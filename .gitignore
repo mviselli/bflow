@@ -219,3 +219,9 @@ __marimo__/
 
 # macOS
 .DS_Store
+
+# Frontend: dipendenze, build e cache locali
+node_modules/
+frontend/dist/
+.vite/
+npm-debug.log*
