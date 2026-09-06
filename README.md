@@ -9,8 +9,11 @@ The initial foundation is available: the `bflow` Python package, dependencies,
 and a Vite frontend with a static scene that verifies PixiJS initialization.
 Python data models for baggage, conveyors, and the minimal route configuration
 are available with validation tests. The engine has a fixed 50 ms simulation
-clock and an independent seeded random generator. Baggage generation and
-movement, the CLI, FastAPI server, and simulation controls are not yet implemented.
+clock and an independent seeded random generator. Regular arrivals queue at the
+entrance and enter only when baggage length and minimum spacing fit. Generated
+and admitted counts are tracked separately. Movement, the CLI, FastAPI server,
+and simulation controls are not yet implemented; admitted baggage currently
+stays at the entrance while subsequent arrivals wait.
 
 ## Requirements
 
@@ -55,7 +58,8 @@ uv run pytest --version
 
 Run the Python tests with `uv run pytest`. The current suite checks data model
 validation, simulated timestamps, configuration boundaries, fixed simulation
-steps, and seeded random reproducibility.
+steps, seeded random reproducibility, arrival rates, entrance queues, and
+admission spacing.
 
 ## Build and preview
 
