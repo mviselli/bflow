@@ -7,8 +7,9 @@ an Italian-language 2D interface built with PixiJS.
 
 The initial foundation is available: the `bflow` Python package, dependencies,
 and a Vite frontend with a static scene that verifies PixiJS initialization.
-The simulation engine, CLI, FastAPI server, and simulation controls are not yet
-implemented.
+Python data models for baggage, conveyors, and the minimal route configuration
+are available with validation tests. Simulation stepping, the CLI, FastAPI
+server, and simulation controls are not yet implemented.
 
 ## Requirements
 
@@ -51,9 +52,8 @@ uv run python -c "import bflow; import bflow.core; import bflow.server"
 uv run pytest --version
 ```
 
-Once tests are available, run them with `uv run pytest`. Currently, `tests/`
-is empty: pytest reports no tests collected and exits with code 5 until
-engine tests are added.
+Run the Python tests with `uv run pytest`. The current suite checks data model
+validation, simulated timestamps, and configuration boundaries.
 
 ## Build and preview
 
