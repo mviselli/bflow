@@ -11,9 +11,10 @@ Python data models for baggage, conveyors, and the minimal route configuration
 are available with validation tests. The engine has a fixed 50 ms simulation
 clock and an independent seeded random generator. Regular arrivals queue at the
 entrance and enter only when baggage length and minimum spacing fit. Generated
-and admitted counts are tracked separately. Movement, the CLI, FastAPI server,
-and simulation controls are not yet implemented; admitted baggage currently
-stays at the entrance while subsequent arrivals wait.
+and admitted counts are tracked separately. Baggage moves at the configured
+belt speed, maintaining spacing without overtaking, and queues at the end of
+the belt. Transfers and exits, the CLI, FastAPI server, and simulation controls
+are not yet implemented.
 
 ## Requirements
 
@@ -59,7 +60,7 @@ uv run pytest --version
 Run the Python tests with `uv run pytest`. The current suite checks data model
 validation, simulated timestamps, configuration boundaries, fixed simulation
 steps, seeded random reproducibility, arrival rates, entrance queues, and
-admission spacing.
+admission spacing, movement, and queue spacing at the end of the belt.
 
 ## Build and preview
 

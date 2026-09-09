@@ -26,7 +26,9 @@ def test_first_arrival_waits_for_a_full_interval():
 
 
 def test_blocked_entrance_preserves_all_demand_and_identifiers():
-    engine = Engine(SimulationConfig(arrival_rate_bags_s=10))
+    engine = Engine(SimulationConfig(
+        conveyor=ConveyorConfig(length_m=0.6), arrival_rate_bags_s=10,
+    ))
     for _ in range(200):
         engine.step()
         assert engine.generated_count == engine.admitted_count + len(engine.waiting)
@@ -60,9 +62,10 @@ def test_admission_requires_baggage_length_plus_free_gap(offset, admitted):
     engine = Engine(SimulationConfig(arrival_rate_bags_s=20))
     engine.step()
     first = engine.conveyor.baggage[0]
-    # Place the first bag directly: movement is a separate engine responsibility.
-    first.position_m = engine.config.baggage_length_m + engine.config.min_gap_m + offset
+    # Isolate admission at an exact boundary, independently of movement.
     engine.step()
+    first.position_m = engine.config.baggage_length_m + engine.config.min_gap_m + offset
+    engine._admit()
     assert engine.admitted_count == (2 if admitted else 1)
     assert len(engine.waiting) == (0 if admitted else 1)
     if admitted:
@@ -103,4 +106,5 @@ def test_same_seed_and_config_reproduce_bags_queue_and_counts():
     assert first.conveyor == second.conveyor
     assert first.waiting == second.waiting
     assert first.generated_count == second.generated_count == 70
-    assert first.admitted_count == second.admitted_count == 1
+    assert first.admitted_count == second.admitted_count
+    assert first.admitted_count > 1

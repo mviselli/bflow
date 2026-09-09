@@ -22,8 +22,8 @@ class Engine:
     globale del modulo random. Stesso seed e stesse operazioni riproducono la
     sequenza senza interferenze fra istanze. Gli arrivi sono regolari, al ritmo
     configurato, e rilevati alla fine del tick: nel percorso minimo non servono
-    estrazioni casuali perché esiste una sola destinazione. Il movimento sarà
-    aggiunto successivamente, prima dell'ammissione dei nuovi bagagli.
+    estrazioni casuali perché esiste una sola destinazione. Il movimento dei
+    bagagli già presenti precede l'ammissione dei nuovi bagagli.
     """
 
     def __init__(self, config: SimulationConfig | None = None, *, seed: int = 42) -> None:
@@ -51,8 +51,27 @@ class Engine:
     def step(self) -> None:
         """Completa un passo fisso senza consultare il tempo reale o attendere."""
         self._tick += 1
+        self._move()
         self._generate()
         self._admit()
+
+    def _move(self) -> None:
+        """Avanza dall'uscita verso l'ingresso, usando la posizione aggiornata davanti.
+
+        Il bordo anteriore si ferma al termine del nastro o al gap minimo dal
+        bordo posteriore del bagaglio precedente. Fino all'introduzione dei
+        trasferimenti, i bagagli restano sul nastro anche a fine corsa.
+        """
+        distance = self.conveyor.config.speed_m_s * STEP_SECONDS
+        front_limit = self.conveyor.config.length_m
+        for baggage in reversed(self.conveyor.baggage):
+            max_position = front_limit - baggage.length_m
+            # max evita piccoli arretramenti dovuti agli arrotondamenti del gap.
+            baggage.position_m = max(
+                baggage.position_m,
+                min(baggage.position_m + distance, max_position),
+            )
+            front_limit = baggage.position_m - self.config.min_gap_m
 
     def _generate(self) -> None:
         """Accoda tutti gli arrivi dovuti, senza perdere domanda se il nastro è pieno.
