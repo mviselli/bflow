@@ -37,6 +37,9 @@ class Engine:
         self.waiting: deque[Baggage] = deque()
         self.generated_count = 0
         self.admitted_count = 0
+        self.exited_count = 0
+        # Solo le uscite dell’ultimo tick: nessuna cronologia illimitata.
+        self.exited_this_tick: tuple[Baggage, ...] = ()
 
     @property
     def tick(self) -> int:
@@ -52,6 +55,8 @@ class Engine:
         """Completa un passo fisso senza consultare il tempo reale o attendere."""
         self._tick += 1
         self._move()
+        outgoing = self._evaluate_transfers()
+        self._apply_transfers(outgoing)
         self._generate()
         self._admit()
 
@@ -59,8 +64,8 @@ class Engine:
         """Avanza dall'uscita verso l'ingresso, usando la posizione aggiornata davanti.
 
         Il bordo anteriore si ferma al termine del nastro o al gap minimo dal
-        bordo posteriore del bagaglio precedente. Fino all'introduzione dei
-        trasferimenti, i bagagli restano sul nastro anche a fine corsa.
+        bordo posteriore del bagaglio precedente. La rimozione dei bagagli pronti
+        avviene solo dopo aver completato il movimento di tutti i bagagli.
         """
         distance = self.conveyor.config.speed_m_s * STEP_SECONDS
         front_limit = self.conveyor.config.length_m
@@ -72,6 +77,34 @@ class Engine:
                 min(baggage.position_m + distance, max_position),
             )
             front_limit = baggage.position_m - self.config.min_gap_m
+
+    def _evaluate_transfers(self) -> tuple[Baggage, ...]:
+        """Seleziona l'uscita senza mutare lo stato osservato dopo il movimento.
+
+        Nel percorso minimo solo il bagaglio più a valle può uscire. Il limite
+        usa la stessa sottrazione del movimento, evitando confronti incoerenti
+        per arrotondamento. Nessun epsilon anticipa l'uscita.
+        """
+        if not self.conveyor.baggage:
+            return ()
+        baggage = self.conveyor.baggage[-1]
+        if baggage.position_m >= self.conveyor.config.length_m - baggage.length_m:
+            return (baggage,)
+        return ()
+
+    def _apply_transfers(self, outgoing: tuple[Baggage, ...]) -> None:
+        """Applica una sola volta il risultato della valutazione del tick.
+
+        L'uscita scarica automaticamente. Non si ripete il movimento dopo il
+        trasferimento: chi segue sfrutta lo spazio liberato dal prossimo tick.
+        Anche un nuovo ammesso a fine nastro attende il tick successivo.
+        """
+        self.exited_this_tick = outgoing
+        for baggage in outgoing:
+            self.conveyor.baggage.pop()
+            baggage.conveyor_id = None
+            baggage.exited_at_s = self.time_s
+            self.exited_count += 1
 
     def _generate(self) -> None:
         """Accoda tutti gli arrivi dovuti, senza perdere domanda se il nastro è pieno.

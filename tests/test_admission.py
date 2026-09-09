@@ -25,14 +25,15 @@ def test_first_arrival_waits_for_a_full_interval():
     assert not engine.waiting
 
 
-def test_blocked_entrance_preserves_all_demand_and_identifiers():
+def test_blocked_entrance_preserves_all_demand_and_identifiers(monkeypatch):
     engine = Engine(SimulationConfig(
         conveyor=ConveyorConfig(length_m=0.6), arrival_rate_bags_s=10,
     ))
+    monkeypatch.setattr(engine, "_evaluate_transfers", lambda: ())
     for _ in range(200):
         engine.step()
         assert engine.generated_count == engine.admitted_count + len(engine.waiting)
-        assert engine.admitted_count == len(engine.conveyor.baggage)
+        assert engine.admitted_count == engine.exited_count + len(engine.conveyor.baggage)
     assert engine.generated_count == 100
     assert engine.admitted_count == 1
     assert [bag.id for bag in engine.waiting] == [f"bag-{i}" for i in range(2, 101)]
@@ -93,9 +94,10 @@ def test_exact_length_baggage_can_enter_empty_belt_without_end_gap():
         conveyor=ConveyorConfig(length_m=0.6), baggage_length_m=0.6,
         arrival_rate_bags_s=20,
     ))
-    advance(engine, 2)
+    engine.step()
     assert engine.admitted_count == 1
-    assert len(engine.waiting) == 1
+    assert not engine.waiting
+    assert engine.conveyor.baggage[0].position_m == 0
 
 
 def test_same_seed_and_config_reproduce_bags_queue_and_counts():

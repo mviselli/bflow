@@ -12,9 +12,11 @@ are available with validation tests. The engine has a fixed 50 ms simulation
 clock and an independent seeded random generator. Regular arrivals queue at the
 entrance and enter only when baggage length and minimum spacing fit. Generated
 and admitted counts are tracked separately. Baggage moves at the configured
-belt speed, maintaining spacing without overtaking, and queues at the end of
-the belt. Transfers and exits, the CLI, FastAPI server, and simulation controls
-are not yet implemented.
+belt speed, maintaining spacing without overtaking, and leaves through the
+output. Transfers are evaluated after movement and applied separately; bags
+behind a departing bag use the freed space on the next tick. Exit counts and
+the current tick’s departed bags are available; travel-time statistics, the CLI,
+FastAPI server, and simulation controls are not yet implemented.
 
 ## Requirements
 
@@ -60,7 +62,7 @@ uv run pytest --version
 Run the Python tests with `uv run pytest`. The current suite checks data model
 validation, simulated timestamps, configuration boundaries, fixed simulation
 steps, seeded random reproducibility, arrival rates, entrance queues, and
-admission spacing, movement, and queue spacing at the end of the belt.
+admission spacing, movement, deterministic exits, and baggage conservation.
 
 ## Build and preview
 

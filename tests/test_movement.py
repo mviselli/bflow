@@ -44,12 +44,12 @@ def test_large_step_stops_at_end_and_propagates_queue_with_mixed_lengths():
     rear = place(engine, 'rear', 0, 1.2)
     middle = place(engine, 'middle', 2, 0.4)
     front = place(engine, 'front', 8, 0.9)
-    engine.step()
+    engine._move()
     assert front.position_m == pytest.approx(9.1)
     assert middle.position_m == pytest.approx(8.5)
     assert rear.position_m == pytest.approx(7.1)
     positions = [b.position_m for b in engine.conveyor.baggage]
-    engine.step()
+    engine._move()
     assert [b.position_m for b in engine.conveyor.baggage] == positions
     assert [b.id for b in engine.conveyor.baggage] == ['rear', 'middle', 'front']
 
@@ -71,7 +71,7 @@ def test_long_run_preserves_bounds_order_spacing_and_counts_every_tick(gap):
         engine.step()
         bags = engine.conveyor.baggage
         assert engine.generated_count == engine.admitted_count + len(engine.waiting)
-        assert engine.admitted_count == len(bags)
+        assert engine.admitted_count == engine.exited_count + len(bags)
         assert len({b.id for b in bags}) == len(bags)
         for bag in bags:
             assert 0 <= bag.position_m <= 10 - bag.length_m + 1e-12
@@ -83,7 +83,7 @@ def test_long_run_preserves_bounds_order_spacing_and_counts_every_tick(gap):
             assert int(rear.id.split('-')[1]) > int(front.id.split('-')[1])
         previous = {b.id: b.position_m for b in bags}
     assert len(engine.waiting) > 0
-    assert bags[-1].position_m == pytest.approx(9.4)
+    assert engine.exited_count > 0
 
 
 def test_empty_belt_can_step():
