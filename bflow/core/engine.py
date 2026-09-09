@@ -37,7 +37,9 @@ class Engine:
         self.waiting: deque[Baggage] = deque()
         self.generated_count = 0
         self.admitted_count = 0
-        self.exited_count = 0
+        self.correctly_delivered_count = 0
+        self.misdelivered_count = 0
+        self._total_travel_time_s = 0.0
         # Solo le uscite dell’ultimo tick: nessuna cronologia illimitata.
         self.exited_this_tick: tuple[Baggage, ...] = ()
 
@@ -50,6 +52,27 @@ class Engine:
     def time_s(self) -> float:
         """Tempo simulato in secondi, calcolato senza accumulare arrotondamenti."""
         return self._tick * STEP_MS / 1000
+
+    @property
+    def exited_count(self) -> int:
+        """Tutte le uscite, corrette ed errate, senza un contatore duplicato."""
+        return self.correctly_delivered_count + self.misdelivered_count
+
+    @property
+    def in_transit_count(self) -> int:
+        """Bagagli ancora sul nastro, inclusi quelli fermi; esclusa l'attesa."""
+        return len(self.conveyor.baggage)
+
+    @property
+    def mean_travel_time_s(self) -> float | None:
+        """Media ammissione → uscita, anche errata; None senza campioni.
+
+        CLI e GUI potranno visualizzare None come “—”. Si conserva solo la
+        somma dei tempi, non una cronologia crescente dei bagagli usciti.
+        """
+        if self.exited_count == 0:
+            return None
+        return self._total_travel_time_s / self.exited_count
 
     def step(self) -> None:
         """Completa un passo fisso senza consultare il tempo reale o attendere."""
@@ -101,10 +124,16 @@ class Engine:
         """
         self.exited_this_tick = outgoing
         for baggage in outgoing:
+            if baggage.entered_at_s is None:
+                raise ValueError("Un bagaglio in uscita deve essere stato ammesso")
             self.conveyor.baggage.pop()
             baggage.conveyor_id = None
             baggage.exited_at_s = self.time_s
-            self.exited_count += 1
+            if baggage.destination_id == self.config.output_id:
+                self.correctly_delivered_count += 1
+            else:
+                self.misdelivered_count += 1
+            self._total_travel_time_s += self.time_s - baggage.entered_at_s
 
     def _generate(self) -> None:
         """Accoda tutti gli arrivi dovuti, senza perdere domanda se il nastro è pieno.

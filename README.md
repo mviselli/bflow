@@ -14,9 +14,12 @@ entrance and enter only when baggage length and minimum spacing fit. Generated
 and admitted counts are tracked separately. Baggage moves at the configured
 belt speed, maintaining spacing without overtaking, and leaves through the
 output. Transfers are evaluated after movement and applied separately; bags
-behind a departing bag use the freed space on the next tick. Exit counts and
-the current tick’s departed bags are available; travel-time statistics, the CLI,
-FastAPI server, and simulation controls are not yet implemented.
+behind a departing bag use the freed space on the next tick. Correct and incorrect
+exit counts, baggage in transit, and mean travel time are available from the
+engine. Travel time excludes waiting before admission and includes all exits;
+the mean is `None` until the first exit. Only the current tick’s departed bags
+are retained. The CLI, FastAPI server, and simulation controls are not yet
+implemented.
 
 ## Requirements
 
