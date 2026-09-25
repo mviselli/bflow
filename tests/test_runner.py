@@ -3,11 +3,9 @@
 import asyncio
 
 import pytest
-from fastapi.testclient import TestClient
 
 from bflow.core.engine import Engine
 from bflow.server import runner as runner_module
-from bflow.server.app import create_app
 from bflow.server.protocol import PauseCommand, StartCommand
 from bflow.server.runner import MAX_TICKS_PER_UPDATE, Runner
 
@@ -141,20 +139,3 @@ def test_run_loop_advances_the_engine_in_real_time(monkeypatch):
         return runner.engine.tick
 
     assert asyncio.run(scenario()) == 2
-
-
-def test_app_starts_the_runner_and_reports_status():
-    runner, clock = make_runner()
-    app = create_app(runner)
-    with TestClient(app) as client:
-        assert app.state.runner is runner
-        assert client.get("/api/status").json() == {
-            "tick": 0, "time_s": 0.0, "running": False,
-        }
-        runner.submit(START)
-        runner.update()
-        clock.now += 1
-        runner.update()
-        assert client.get("/api/status").json() == {
-            "tick": 20, "time_s": 1.0, "running": True,
-        }

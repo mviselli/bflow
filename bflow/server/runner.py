@@ -73,6 +73,11 @@ class Runner:
             await asyncio.sleep(UPDATE_INTERVAL_S)
 
     def _apply(self, command: Command, now: float) -> None:
+        """Start also resumes after a pause; repeated commands change nothing.
+
+        Resuming restarts the real-time reference, so the real time spent
+        paused is never simulated afterwards.
+        """
         if isinstance(command, StartCommand) and not self.running:
             self.running = True
             self._restart_clock(now)

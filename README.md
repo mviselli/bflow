@@ -22,8 +22,9 @@ are retained. The engine produces an immutable statistics snapshot and an
 event log with progressive identifiers, severity, and a bounded recent
 history; an entrance queue is recorded when it starts and when it clears, not
 on every tick. A command-line run prints the summary without a browser. A
-first FastAPI server owns the engine and advances it in real time; the
-browser connection and simulation controls are not yet available.
+first FastAPI server owns the engine, advances it in real time, and accepts
+start, pause, and resume commands over a WebSocket; the interface does not yet
+display the simulation or offer controls.
 
 ## Requirements
 
@@ -71,7 +72,8 @@ validation, simulated timestamps, configuration boundaries, fixed simulation
 steps, seeded random reproducibility, arrival rates, entrance queues, and
 admission spacing, movement, deterministic exits, baggage conservation, the
 event log, statistics snapshots, the command-line summary, the server's
-real-time runner, and validation of the messages exchanged with the browser.
+real-time runner, validation of the messages exchanged with the browser, and
+start, pause, and resume over the WebSocket.
 
 ## Command-line run
 
@@ -98,8 +100,24 @@ A single runner owns the engine: it applies queued commands, then runs the
 50 ms steps that real time says are due, in small groups so the server stays
 responsive. If the machine falls behind, the simulation slows down instead of
 catching up in a burst. The simulation starts stopped; `GET /api/status`
-returns the current tick, simulated time, and whether it is running. Browser
-controls are not yet connected.
+returns the current tick, simulated time, and whether it is running.
+
+Commands are JSON messages sent over the WebSocket at `ws://127.0.0.1:8000/ws`:
+`{"type": "start"}` starts the simulation or resumes it after a pause, and
+`{"type": "pause"}` freezes simulated time. Commands are applied even while
+paused, and repeating one has no effect. An invalid command receives an
+`{"type": "error", "message": ...}` reply and the connection stays open.
+Buttons in the interface are not yet connected; to try the commands, open the
+browser developer console on any page and run:
+
+```js
+const ws = new WebSocket("ws://127.0.0.1:8000/ws");
+ws.onmessage = (event) => console.log(event.data);
+ws.onopen = () => ws.send(JSON.stringify({ type: "start" }));
+```
+
+Then reload `/api/status` to watch the tick advance, and send
+`ws.send(JSON.stringify({ type: "pause" }))` to stop it.
 
 ## Build and preview
 
