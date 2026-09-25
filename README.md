@@ -21,8 +21,9 @@ the mean is `None` until the first exit. Only the current tick’s departed bags
 are retained. The engine produces an immutable statistics snapshot and an
 event log with progressive identifiers, severity, and a bounded recent
 history; an entrance queue is recorded when it starts and when it clears, not
-on every tick. A command-line run prints the summary without a browser. The
-FastAPI server and simulation controls are not yet implemented.
+on every tick. A command-line run prints the summary without a browser. A
+first FastAPI server owns the engine and advances it in real time; the
+browser connection and simulation controls are not yet available.
 
 ## Requirements
 
@@ -69,7 +70,8 @@ Run the Python tests with `uv run pytest`. The current suite checks data model
 validation, simulated timestamps, configuration boundaries, fixed simulation
 steps, seeded random reproducibility, arrival rates, entrance queues, and
 admission spacing, movement, deterministic exits, baggage conservation, the
-event log, statistics snapshots, and the command-line summary.
+event log, statistics snapshots, the command-line summary, and the server's
+real-time runner.
 
 ## Command-line run
 
@@ -84,6 +86,20 @@ the conservation check `admitted = delivered + misdelivered + in transit`.
 `--duration` is in simulated seconds and must be a multiple of 50 ms (default
 600); `--seed` defaults to 42. The command exits with status 1 if conservation
 fails.
+
+## Simulation server
+
+```sh
+uv run uvicorn bflow.server.app:app
+```
+
+Starts the FastAPI server at [http://127.0.0.1:8000](http://127.0.0.1:8000).
+A single runner owns the engine: it applies queued commands, then runs the
+50 ms steps that real time says are due, in small groups so the server stays
+responsive. If the machine falls behind, the simulation slows down instead of
+catching up in a burst. The simulation starts stopped; `GET /api/status`
+returns the current tick, simulated time, and whether it is running. Browser
+controls are not yet connected.
 
 ## Build and preview
 
@@ -108,7 +124,7 @@ Backend and frontend development will use two separate processes.
 
 ```text
 bflow/core/              Simulation engine, independent of server and graphics
-bflow/server/            Future FastAPI server
+bflow/server/            FastAPI server and real-time runner
 tests/                   Python tests
 frontend/src/            JavaScript and CSS
 frontend/public/assets/  Graphics assets
