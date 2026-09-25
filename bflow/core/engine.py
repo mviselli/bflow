@@ -3,7 +3,9 @@
 from collections import deque
 from random import Random
 
+from bflow.core.events import EventLog, Severity
 from bflow.core.models import Baggage, Conveyor, SimulationConfig
+from bflow.core.stats import Stats
 
 
 STEP_MS = 50
@@ -42,6 +44,8 @@ class Engine:
         self._total_travel_time_s = 0.0
         # Solo le uscite dell’ultimo tick: nessuna cronologia illimitata.
         self.exited_this_tick: tuple[Baggage, ...] = ()
+        self.events = EventLog()
+        self._entrance_queued = False
 
     @property
     def tick(self) -> int:
@@ -74,6 +78,22 @@ class Engine:
             return None
         return self._total_travel_time_s / self.exited_count
 
+    def stats(self) -> Stats:
+        """Fotografia dei conteggi al tick corrente, per CLI e GUI."""
+        return Stats(
+            tick=self.tick,
+            time_s=self.time_s,
+            generated=self.generated_count,
+            waiting=len(self.waiting),
+            admitted=self.admitted_count,
+            correctly_delivered=self.correctly_delivered_count,
+            misdelivered=self.misdelivered_count,
+            in_transit=self.in_transit_count,
+            mean_travel_time_s=self.mean_travel_time_s,
+            errors=self.events.counts[Severity.ERROR],
+            warnings=self.events.counts[Severity.WARNING],
+        )
+
     def step(self) -> None:
         """Completa un passo fisso senza consultare il tempo reale o attendere."""
         self._tick += 1
@@ -82,6 +102,7 @@ class Engine:
         self._apply_transfers(outgoing)
         self._generate()
         self._admit()
+        self._update_entrance_queue()
 
     def _move(self) -> None:
         """Avanza dall'uscita verso l'ingresso, usando la posizione aggiornata davanti.
@@ -175,3 +196,21 @@ class Engine:
         baggage.position_m = 0.0
         self.conveyor.baggage.insert(0, baggage)
         self.admitted_count += 1
+
+    def _update_entrance_queue(self) -> None:
+        """Registra inizio e fine della coda all'ingresso, non ogni tick di attesa.
+
+        La coda esiste quando, dopo l'ammissione, resta almeno un bagaglio in
+        attesa. È un evento informativo: il warning di attesa prolungata avrà
+        soglie proprie.
+        """
+        queued = bool(self.waiting)
+        if queued == self._entrance_queued:
+            return
+        self._entrance_queued = queued
+        if queued:
+            kind, message = "entrance_queue_started", "Coda all'ingresso: nastro senza spazio"
+        else:
+            kind, message = "entrance_queue_cleared", "Coda all'ingresso smaltita"
+        self.events.record(self.tick, self.time_s, Severity.INFO, kind, message,
+                           element_id=self.config.input_id)

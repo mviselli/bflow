@@ -18,8 +18,11 @@ behind a departing bag use the freed space on the next tick. Correct and incorre
 exit counts, baggage in transit, and mean travel time are available from the
 engine. Travel time excludes waiting before admission and includes all exits;
 the mean is `None` until the first exit. Only the current tick’s departed bags
-are retained. The CLI, FastAPI server, and simulation controls are not yet
-implemented.
+are retained. The engine produces an immutable statistics snapshot and an
+event log with progressive identifiers, severity, and a bounded recent
+history; an entrance queue is recorded when it starts and when it clears, not
+on every tick. A command-line run prints the summary without a browser. The
+FastAPI server and simulation controls are not yet implemented.
 
 ## Requirements
 
@@ -65,7 +68,22 @@ uv run pytest --version
 Run the Python tests with `uv run pytest`. The current suite checks data model
 validation, simulated timestamps, configuration boundaries, fixed simulation
 steps, seeded random reproducibility, arrival rates, entrance queues, and
-admission spacing, movement, deterministic exits, and baggage conservation.
+admission spacing, movement, deterministic exits, baggage conservation, the
+event log, statistics snapshots, and the command-line summary.
+
+## Command-line run
+
+```sh
+uv run python -m bflow.cli --duration 600 --seed 42
+```
+
+Runs the default route without the browser, as fast as possible, and prints
+generated, waiting, admitted, correctly delivered, misdelivered, and in-transit
+baggage, the mean travel time (`—` before the first exit), errors, warnings, and
+the conservation check `admitted = delivered + misdelivered + in transit`.
+`--duration` is in simulated seconds and must be a multiple of 50 ms (default
+600); `--seed` defaults to 42. The command exits with status 1 if conservation
+fails.
 
 ## Build and preview
 
