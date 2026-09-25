@@ -70,8 +70,8 @@ Run the Python tests with `uv run pytest`. The current suite checks data model
 validation, simulated timestamps, configuration boundaries, fixed simulation
 steps, seeded random reproducibility, arrival rates, entrance queues, and
 admission spacing, movement, deterministic exits, baggage conservation, the
-event log, statistics snapshots, the command-line summary, and the server's
-real-time runner.
+event log, statistics snapshots, the command-line summary, the server's
+real-time runner, and validation of the messages exchanged with the browser.
 
 ## Command-line run
 

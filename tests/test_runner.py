@@ -8,7 +8,12 @@ from fastapi.testclient import TestClient
 from bflow.core.engine import Engine
 from bflow.server import runner as runner_module
 from bflow.server.app import create_app
+from bflow.server.protocol import PauseCommand, StartCommand
 from bflow.server.runner import MAX_TICKS_PER_UPDATE, Runner
+
+
+START = StartCommand(type="start")
+PAUSE = PauseCommand(type="pause")
 
 
 class FakeClock:
@@ -34,7 +39,7 @@ def test_runner_starts_stopped_at_tick_zero():
 
 def test_submit_only_queues_the_command():
     runner, _ = make_runner()
-    runner.submit("start")
+    runner.submit(START)
     assert not runner.running
     assert runner.commands.qsize() == 1
     runner.update()
@@ -42,16 +47,9 @@ def test_submit_only_queues_the_command():
     assert runner.commands.empty()
 
 
-def test_unknown_command_is_rejected_and_not_queued():
-    runner, _ = make_runner()
-    with pytest.raises(ValueError, match="unknown command"):
-        runner.submit("explode")
-    assert runner.commands.empty()
-
-
 def test_ticks_follow_real_time_at_exact_thresholds():
     runner, clock = make_runner()
-    runner.submit("start")
+    runner.submit(START)
     runner.update()
     clock.now += 0.049
     assert runner.update() == 0
@@ -64,7 +62,7 @@ def test_ticks_follow_real_time_at_exact_thresholds():
 
 def test_long_gap_runs_a_limited_group_and_drops_the_backlog():
     runner, clock = make_runner()
-    runner.submit("start")
+    runner.submit(START)
     runner.update()
     clock.now += 60
     assert runner.update() == MAX_TICKS_PER_UPDATE
@@ -77,16 +75,16 @@ def test_long_gap_runs_a_limited_group_and_drops_the_backlog():
 
 def test_commands_are_applied_while_paused_and_pause_freezes_time():
     runner, clock = make_runner()
-    runner.submit("start")
+    runner.submit(START)
     runner.update()
     clock.now += 1
     runner.update()
-    runner.submit("pause")
+    runner.submit(PAUSE)
     clock.now += 1
     assert runner.update() == 0
     assert runner.engine.tick == 20
     clock.now += 30
-    runner.submit("start")
+    runner.submit(START)
     runner.update()
     clock.now += 0.25
     assert runner.update() == 5
@@ -95,10 +93,10 @@ def test_commands_are_applied_while_paused_and_pause_freezes_time():
 
 def test_repeated_start_does_not_restart_the_clock():
     runner, clock = make_runner()
-    runner.submit("start")
+    runner.submit(START)
     runner.update()
     clock.now += 0.03
-    runner.submit("start")
+    runner.submit(START)
     runner.update()
     clock.now += 0.02
     assert runner.update() == 1
@@ -106,17 +104,17 @@ def test_repeated_start_does_not_restart_the_clock():
 
 def test_commands_are_applied_in_order_before_the_ticks():
     runner, clock = make_runner()
-    runner.submit("start")
+    runner.submit(START)
     runner.update()
     clock.now += 0.5
-    runner.submit("pause")
+    runner.submit(PAUSE)
     assert runner.update() == 0
     assert runner.engine.tick == 0
 
 
 def test_runner_matches_an_engine_stepped_directly():
     runner, clock = make_runner()
-    runner.submit("start")
+    runner.submit(START)
     runner.update()
     for _ in range(600):
         clock.now += 0.05
@@ -133,7 +131,7 @@ def test_run_loop_advances_the_engine_in_real_time(monkeypatch):
     async def scenario():
         runner, clock = make_runner()
         task = asyncio.create_task(runner.run())
-        runner.submit("start")
+        runner.submit(START)
         await asyncio.sleep(0.01)
         clock.now += 0.1
         await asyncio.sleep(0.01)
@@ -153,7 +151,7 @@ def test_app_starts_the_runner_and_reports_status():
         assert client.get("/api/status").json() == {
             "tick": 0, "time_s": 0.0, "running": False,
         }
-        runner.submit("start")
+        runner.submit(START)
         runner.update()
         clock.now += 1
         runner.update()

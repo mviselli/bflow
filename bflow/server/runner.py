@@ -11,9 +11,9 @@ import time
 from collections.abc import Callable
 
 from bflow.core.engine import STEP_MS, Engine
+from bflow.server.protocol import Command, PauseCommand, StartCommand
 
 
-COMMANDS = ("start", "pause")
 # Real seconds between two updates of the loop.
 UPDATE_INTERVAL_S = 0.02
 # At most 1 simulated second per update, so that commands stay responsive.
@@ -32,17 +32,15 @@ class Runner:
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.engine = engine if engine is not None else Engine()
         self.clock = clock
-        self.commands: asyncio.Queue[str] = asyncio.Queue()
+        self.commands: asyncio.Queue[Command] = asyncio.Queue()
         self.running = False
         # Real time and tick at which the current run started: the ticks due
         # are counted from here, without accumulating real time deltas.
         self._started_at = 0.0
         self._started_tick = 0
 
-    def submit(self, command: str) -> None:
-        """Queues a command; it is applied at the start of the next update."""
-        if command not in COMMANDS:
-            raise ValueError(f"unknown command: {command!r}")
+    def submit(self, command: Command) -> None:
+        """Queues a validated command; it is applied at the start of the next update."""
         self.commands.put_nowait(command)
 
     def update(self) -> int:
@@ -74,11 +72,11 @@ class Runner:
             self.update()
             await asyncio.sleep(UPDATE_INTERVAL_S)
 
-    def _apply(self, command: str, now: float) -> None:
-        if command == "start" and not self.running:
+    def _apply(self, command: Command, now: float) -> None:
+        if isinstance(command, StartCommand) and not self.running:
             self.running = True
             self._restart_clock(now)
-        elif command == "pause":
+        elif isinstance(command, PauseCommand):
             self.running = False
 
     def _restart_clock(self, now: float) -> None:
