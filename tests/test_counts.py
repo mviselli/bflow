@@ -1,4 +1,4 @@
-"""Conteggi e tempi: attesa esterna esclusa, uscite errate incluse."""
+"""Counts and times: entrance waiting excluded, wrong exits included."""
 
 import pytest
 
@@ -21,7 +21,7 @@ def test_known_journey_times_exclude_waiting_and_include_wrong_exit():
     engine = Engine(SimulationConfig(arrival_rate_bags_s=0))
     for _ in range(100):
         engine.step()
-    # Due arrivi con tempi di ammissione distinti, entrambi al termine del nastro.
+    # Two bags with different admission times, both at the end of the belt.
     correct = Baggage('first', engine.config.output_id, 0.6, 0,
                       engine.config.conveyor.id, 9.4, entered_at_s=2)
     engine.conveyor.baggage.append(correct)

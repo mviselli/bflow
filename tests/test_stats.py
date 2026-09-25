@@ -1,4 +1,4 @@
-"""Riepilogo statistico: fotografia coerente dei contatori del motore."""
+"""Statistics snapshot: a consistent picture of the engine counters."""
 
 import dataclasses
 

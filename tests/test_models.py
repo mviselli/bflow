@@ -1,4 +1,4 @@
-"""Contratto dei dati fisici e del ciclo di vita, prima del motore."""
+"""Physical data and lifecycle contract, independent of the engine."""
 
 from dataclasses import FrozenInstanceError
 

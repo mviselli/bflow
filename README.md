@@ -1,7 +1,7 @@
 # BaggageFlow
 
 An educational airport baggage sorting simulator with a Python engine and
-an Italian-language 2D interface built with PixiJS.
+a 2D interface built with PixiJS.
 
 ## Project status
 

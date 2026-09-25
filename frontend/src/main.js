@@ -15,7 +15,7 @@ async function initialize() {
   });
   map.appendChild(app.canvas);
   app.canvas.setAttribute('role', 'img');
-  app.canvas.setAttribute('aria-label', 'Area grafica iniziale, impianto non ancora presente');
+  app.canvas.setAttribute('aria-label', 'Initial graphics area, no plant yet');
 
   const grid = new Graphics();
   app.stage.addChild(grid);
@@ -30,12 +30,12 @@ async function initialize() {
 
   app.renderer.on('resize', drawGrid);
   drawGrid(app.screen.width, app.screen.height);
-  // La scena è statica: il ticker verrà attivato quando ci saranno animazioni.
+  // The scene is static: the ticker will be started once there are animations.
   app.stop();
-  status.textContent = 'Grafica pronta · simulazione non ancora implementata';
+  status.textContent = 'Graphics ready · simulation not implemented yet';
 }
 
 initialize().catch((error) => {
-  status.textContent = 'Impossibile inizializzare la grafica. Verifica il supporto WebGL del browser.';
-  console.error('Inizializzazione PixiJS fallita:', error);
+  status.textContent = 'Unable to initialize graphics. Check that WebGL is enabled in your browser.';
+  console.error('PixiJS initialization failed:', error);
 });

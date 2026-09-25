@@ -1,1 +1,1 @@
-"""Integrazione web del motore; dipende da core, mai il contrario."""
+"""Web integration of the engine; depends on core, never the other way around."""

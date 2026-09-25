@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "baggageflow"
 version = "0.1.0"
-description = "Simulatore didattico di smistamento bagagli aeroportuali"
+description = "Educational airport baggage sorting simulator"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

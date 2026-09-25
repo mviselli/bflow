@@ -1,4 +1,4 @@
-"""Registro eventi: identificativi progressivi, cronologia limitata, condizioni."""
+"""Event log: progressive identifiers, bounded history, conditions."""
 
 import pytest
 
@@ -11,8 +11,8 @@ def test_ids_are_progressive_and_counts_survive_the_bounded_history():
     log = EventLog(max_recent=3)
     assert log.last_id == log.total_count == 0
     for tick in range(1, 6):
-        log.record(tick, tick / 20, Severity.WARNING, "test", "prova")
-    log.record(6, 0.3, "error", "test", "prova", element_id="belt-1", baggage_id="bag-1")
+        log.record(tick, tick / 20, Severity.WARNING, "test", "sample")
+    log.record(6, 0.3, "error", "test", "sample", element_id="belt-1", baggage_id="bag-1")
     assert [event.id for event in log.recent] == [4, 5, 6]
     assert log.total_count == log.last_id == 6
     assert log.counts == {Severity.INFO: 0, Severity.WARNING: 5, Severity.ERROR: 1}
@@ -24,7 +24,7 @@ def test_ids_are_progressive_and_counts_survive_the_bounded_history():
 def test_since_returns_only_newer_retained_events():
     log = EventLog(max_recent=3)
     for tick in range(1, 6):
-        log.record(tick, tick / 20, Severity.INFO, "test", "prova")
+        log.record(tick, tick / 20, Severity.INFO, "test", "sample")
     assert [event.id for event in log.since(0)] == [3, 4, 5]
     assert [event.id for event in log.since(4)] == [5]
     assert log.since(5) == ()
@@ -38,7 +38,7 @@ def test_history_size_must_be_a_positive_integer(max_recent):
 
 def test_unknown_severity_is_rejected():
     with pytest.raises(ValueError):
-        EventLog().record(1, 0.05, "fatal", "test", "prova")
+        EventLog().record(1, 0.05, "fatal", "test", "sample")
 
 
 def test_normal_flow_produces_no_events():

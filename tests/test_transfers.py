@@ -1,4 +1,4 @@
-"""Trasferimenti verso l'uscita del percorso minimo."""
+"""Transfers to the output of the minimal route."""
 
 from copy import deepcopy
 

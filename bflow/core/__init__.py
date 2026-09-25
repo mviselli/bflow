@@ -1,1 +1,1 @@
-"""Motore di simulazione indipendente da server e interfaccia grafica."""
+"""Simulation engine, independent of the server and the graphical interface."""

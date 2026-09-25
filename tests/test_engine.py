@@ -1,4 +1,4 @@
-"""Verifiche dell'orologio simulato e della casualità locale alla run."""
+"""Simulated clock and per-run randomness."""
 
 import random
 

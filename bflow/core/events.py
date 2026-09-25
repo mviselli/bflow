@@ -1,9 +1,9 @@
-"""Eventi del motore con identificativi progressivi e cronologia limitata.
+"""Engine events with progressive identifiers and a bounded history.
 
-Un evento descrive un cambiamento, non uno stato ripetuto: per una condizione
-si registrano l'inizio e la risoluzione, mai un evento identico a ogni tick.
-I conteggi per gravità sono cumulativi e non dipendono dalla cronologia
-conservata, che mantiene solo gli eventi più recenti.
+An event describes a change, not a repeated state: for a condition the start
+and the resolution are recorded, never an identical event at every tick.
+Per-severity counts are cumulative and do not depend on the retained history,
+which keeps only the most recent events.
 """
 
 from collections import deque
@@ -19,11 +19,11 @@ class Severity(StrEnum):
 
 @dataclass(frozen=True)
 class Event:
-    """Evento avvenuto al tick indicato, con tempo simulato e gravità.
+    """Event that happened at the given tick, with simulated time and severity.
 
-    ``kind`` è un codice stabile per programmi e test; ``message`` è il testo
-    da mostrare all'operatore. ``element_id`` e ``baggage_id`` indicano
-    l'elemento dell'impianto o il bagaglio coinvolto, se presenti.
+    ``kind`` is a stable code for programs and tests; ``message`` is the text
+    shown to the operator. ``element_id`` and ``baggage_id`` identify the
+    plant element or bag involved, when there is one.
     """
 
     id: int
@@ -37,27 +37,27 @@ class Event:
 
 
 class EventLog:
-    """Registro degli eventi della singola run.
+    """Event log of a single run.
 
-    Gli identificativi partono da 1 e non si ripetono: chi legge può chiedere
-    solo gli eventi successivi all'ultimo ricevuto con since().
+    Identifiers start at 1 and never repeat: a reader can ask only for the
+    events after the last one it received with since().
     """
 
     def __init__(self, max_recent: int = 100) -> None:
         if isinstance(max_recent, bool) or not isinstance(max_recent, int) or max_recent < 1:
-            raise ValueError("max_recent deve essere un intero positivo")
+            raise ValueError("max_recent must be a positive integer")
         self.recent: deque[Event] = deque(maxlen=max_recent)
         self.counts = {severity: 0 for severity in Severity}
         self._last_id = 0
 
     @property
     def last_id(self) -> int:
-        """Identificativo dell'ultimo evento registrato, zero se nessuno."""
+        """Identifier of the last recorded event, zero if there is none."""
         return self._last_id
 
     @property
     def total_count(self) -> int:
-        """Tutti gli eventi registrati, anche quelli usciti dalla cronologia."""
+        """All recorded events, including those dropped from the history."""
         return self._last_id
 
     def record(
@@ -79,5 +79,5 @@ class EventLog:
         return event
 
     def since(self, event_id: int) -> tuple[Event, ...]:
-        """Eventi conservati con identificativo maggiore di event_id."""
+        """Retained events with an identifier greater than event_id."""
         return tuple(event for event in self.recent if event.id > event_id)

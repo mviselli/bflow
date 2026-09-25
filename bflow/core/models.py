@@ -1,13 +1,13 @@
-"""Dati del motore, senza dipendenze da server o grafica.
+"""Engine data, with no dependency on the server or graphics.
 
-Le distanze sono in metri e i timestamp in secondi simulati, mai tempo reale.
-La posizione indica il bordo posteriore del bagaglio: sul nastro occupa
-``[position_m, position_m + length_m]``. L'ammissione avviene a posizione zero;
-il bordo anteriore raggiunge il termine a ``length_m`` del nastro.
+Distances are in metres and timestamps in simulated seconds, never real time.
+The position is the rear edge of the bag: on the belt it occupies
+``[position_m, position_m + length_m]``. Admission happens at position zero;
+the front edge reaches the end of the belt at the conveyor's ``length_m``.
 
-Le configurazioni sono immutabili; bagagli e contenuto dei nastri sono stato
-mutabile. I controlli alla costruzione non sostituiscono quelli che il motore
-dovrà applicare durante movimento, ammissione e trasferimenti.
+Configurations are immutable; bags and belt contents are mutable state.
+Checks at construction time do not replace those the engine must apply
+during movement, admission and transfers.
 """
 
 from dataclasses import dataclass, field
@@ -16,24 +16,24 @@ from math import isfinite
 
 def _identifier(name: str, value: str) -> None:
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} deve essere un identificativo non vuoto")
+        raise ValueError(f"{name} must be a non-empty identifier")
 
 
 def _quantity(name: str, value: float, *, positive: bool = False) -> None:
     if not isfinite(value) or value < 0 or (positive and value == 0):
-        bound = "positivo" if positive else "non negativo"
-        raise ValueError(f"{name} deve essere finito e {bound}")
+        bound = "positive" if positive else "non-negative"
+        raise ValueError(f"{name} must be finite and {bound}")
 
 
 @dataclass
 class Baggage:
-    """Bagaglio in attesa, ammesso oppure uscito.
+    """A bag that is waiting, admitted or exited.
 
-    ``destination_id`` è l'uscita prevista e non cambia con lo smistamento.
-    Prima dell'ammissione ``conveyor_id`` e ``entered_at_s`` sono None.
-    Dopo l'uscita ``conveyor_id`` torna None e ``exited_at_s`` è valorizzato;
-    ``position_m`` conserva l'ultima posizione. Il tempo di percorrenza parte
-    da ``entered_at_s``, escludendo l'attesa all'ingresso.
+    ``destination_id`` is the intended output and does not change with sorting.
+    Before admission ``conveyor_id`` and ``entered_at_s`` are None.
+    After exit ``conveyor_id`` is None again and ``exited_at_s`` is set;
+    ``position_m`` keeps the last position. Travel time starts at
+    ``entered_at_s``, excluding the wait at the entrance.
     """
 
     id: str
@@ -55,27 +55,27 @@ class Baggage:
             _identifier("conveyor_id", self.conveyor_id)
         if self.entered_at_s is None:
             if self.conveyor_id is not None or self.exited_at_s is not None:
-                raise ValueError("Un bagaglio non ammesso non può essere sul nastro o uscito")
+                raise ValueError("A bag that was not admitted cannot be on a belt or exited")
             if self.position_m != 0:
-                raise ValueError("Un bagaglio in attesa deve avere posizione zero")
+                raise ValueError("A waiting bag must be at position zero")
         else:
             _quantity("entered_at_s", self.entered_at_s)
             if self.entered_at_s < self.generated_at_s:
-                raise ValueError("L'ammissione non può precedere la generazione")
+                raise ValueError("Admission cannot precede generation")
             if self.exited_at_s is None:
                 if self.conveyor_id is None:
-                    raise ValueError("Un bagaglio in transito deve avere un nastro")
+                    raise ValueError("A bag in transit must be on a belt")
             else:
                 _quantity("exited_at_s", self.exited_at_s)
                 if self.exited_at_s < self.entered_at_s:
-                    raise ValueError("L'uscita non può precedere l'ammissione")
+                    raise ValueError("Exit cannot precede admission")
                 if self.conveyor_id is not None:
-                    raise ValueError("Un bagaglio uscito non può essere su un nastro")
+                    raise ValueError("An exited bag cannot be on a belt")
 
 
 @dataclass(frozen=True)
 class ConveyorConfig:
-    """Parametri fisici di un nastro; velocità nominale strettamente positiva."""
+    """Physical parameters of a belt; the nominal speed is strictly positive."""
 
     id: str = "belt-1"
     length_m: float = 10.0
@@ -89,10 +89,10 @@ class ConveyorConfig:
 
 @dataclass
 class Conveyor:
-    """Stato del nastro, con bagagli ordinati dall'ingresso verso l'uscita.
+    """Belt state, with bags ordered from the entrance towards the exit.
 
-    Il motore manterrà ordine, appartenenza e distanziamento della lista.
-    La configurazione rimane separata dallo stato per consentire il reset.
+    The engine maintains the order, membership and spacing of the list.
+    The configuration stays separate from the state so it can be reset.
     """
 
     config: ConveyorConfig
@@ -101,11 +101,11 @@ class Conveyor:
 
 @dataclass(frozen=True)
 class SimulationConfig:
-    """Percorso minimo: input_id → conveyor.id → output_id.
+    """Minimal route: input_id → conveyor.id → output_id.
 
-    Ogni bagaglio ha destinazione output_id. Un ritmo nullo disabilita la
-    generazione; min_gap_m è lo spazio libero fra due bagagli, oltre l'ingombro.
-    La topologia completa e la geometria grafica saranno definite nel layout.
+    Every bag is destined for output_id. A zero rate disables generation;
+    min_gap_m is the free space between two bags, beyond their length.
+    The full topology and graphical geometry will be defined in the layout.
     """
 
     input_id: str = "input-a"
@@ -119,9 +119,9 @@ class SimulationConfig:
         _identifier("input_id", self.input_id)
         _identifier("output_id", self.output_id)
         if len({self.input_id, self.conveyor.id, self.output_id}) != 3:
-            raise ValueError("Ingresso, nastro e uscita devono avere identificativi distinti")
+            raise ValueError("Input, conveyor and output must have distinct identifiers")
         _quantity("arrival_rate_bags_s", self.arrival_rate_bags_s)
         _quantity("baggage_length_m", self.baggage_length_m, positive=True)
         _quantity("min_gap_m", self.min_gap_m)
         if self.baggage_length_m > self.conveyor.length_m:
-            raise ValueError("Il bagaglio deve poter essere contenuto nel nastro")
+            raise ValueError("The bag must fit on the belt")

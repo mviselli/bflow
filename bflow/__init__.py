@@ -1,1 +1,1 @@
-"""BaggageFlow: simulatore didattico di smistamento bagagli."""
+"""BaggageFlow: an educational airport baggage sorting simulator."""

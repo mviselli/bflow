@@ -1,7 +1,7 @@
-"""Riepilogo immutabile delle statistiche, calcolato solo dal motore.
+"""Immutable statistics summary, computed only by the engine.
 
-CLI e GUI mostrano questi valori senza ricostruire una propria versione dei
-conteggi. Il riepilogo è una fotografia: non cambia quando il motore avanza.
+The CLI and GUI display these values without rebuilding their own version of
+the counts. The summary is a snapshot: it does not change as the engine steps.
 """
 
 from dataclasses import dataclass
@@ -27,7 +27,7 @@ class Stats:
 
     @property
     def is_conserved(self) -> bool:
-        """Nessun bagaglio perso o duplicato, né all'ingresso né nell'impianto."""
+        """No bag lost or duplicated, neither at the entrance nor in the plant."""
         return (
             self.generated == self.admitted + self.waiting
             and self.admitted == self.correctly_delivered + self.misdelivered + self.in_transit

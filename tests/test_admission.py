@@ -1,4 +1,4 @@
-"""Arrivi regolari, attesa FIFO e spazio fisico necessario all'ammissione."""
+"""Regular arrivals, FIFO waiting and the physical space required for admission."""
 
 import pytest
 

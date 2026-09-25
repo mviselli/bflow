@@ -1,4 +1,4 @@
-"""Motore a passo fisso, eseguibile senza server e senza attese reali."""
+"""Fixed-step engine that runs without a server and without real-time waits."""
 
 from collections import deque
 from random import Random
@@ -13,24 +13,25 @@ STEP_SECONDS = STEP_MS / 1000
 
 
 class Engine:
-    """Possiede configurazione, stato e generatore casuale della singola run.
+    """Owns the configuration, state and random generator of a single run.
 
-    Il tick conta i passi completati: lo stato iniziale è al tick 0, tempo 0.
-    Ogni chiamata a step() completa esattamente 50 ms simulati. Il chiamante
-    decide quando eseguirla: pausa e velocità reale non cambiano il passo.
-    Il tempo deriva dai tick interi, evitando errori da somme ripetute di 0.05.
+    The tick counts completed steps: the initial state is at tick 0, time 0.
+    Each call to step() completes exactly 50 simulated ms. The caller decides
+    when to run it: pause and real-time speed do not change the step.
+    Time is derived from the integer tick, avoiding errors from repeatedly
+    adding 0.05.
 
-    Tutte le future estrazioni del motore devono usare rng, mai il generatore
-    globale del modulo random. Stesso seed e stesse operazioni riproducono la
-    sequenza senza interferenze fra istanze. Gli arrivi sono regolari, al ritmo
-    configurato, e rilevati alla fine del tick: nel percorso minimo non servono
-    estrazioni casuali perché esiste una sola destinazione. Il movimento dei
-    bagagli già presenti precede l'ammissione dei nuovi bagagli.
+    All future random draws in the engine must use rng, never the global
+    generator of the random module. The same seed and the same operations
+    reproduce the sequence with no interference between instances. Arrivals
+    are regular, at the configured rate, and detected at the end of the tick:
+    the minimal route needs no random draws because it has a single
+    destination. Bags already on the belt move before new bags are admitted.
     """
 
     def __init__(self, config: SimulationConfig | None = None, *, seed: int = 42) -> None:
         if isinstance(seed, bool) or not isinstance(seed, int):
-            raise ValueError("seed deve essere un numero intero")
+            raise ValueError("seed must be an integer")
         self.config = config if config is not None else SimulationConfig()
         self.seed = seed
         self.rng = Random(seed)
@@ -42,44 +43,44 @@ class Engine:
         self.correctly_delivered_count = 0
         self.misdelivered_count = 0
         self._total_travel_time_s = 0.0
-        # Solo le uscite dell’ultimo tick: nessuna cronologia illimitata.
+        # Only the exits of the last tick: no unbounded history.
         self.exited_this_tick: tuple[Baggage, ...] = ()
         self.events = EventLog()
         self._entrance_queued = False
 
     @property
     def tick(self) -> int:
-        """Numero di passi completati, inizialmente zero."""
+        """Number of completed steps, initially zero."""
         return self._tick
 
     @property
     def time_s(self) -> float:
-        """Tempo simulato in secondi, calcolato senza accumulare arrotondamenti."""
+        """Simulated time in seconds, computed without accumulating rounding errors."""
         return self._tick * STEP_MS / 1000
 
     @property
     def exited_count(self) -> int:
-        """Tutte le uscite, corrette ed errate, senza un contatore duplicato."""
+        """All exits, correct and wrong, without a duplicate counter."""
         return self.correctly_delivered_count + self.misdelivered_count
 
     @property
     def in_transit_count(self) -> int:
-        """Bagagli ancora sul nastro, inclusi quelli fermi; esclusa l'attesa."""
+        """Bags still on the belt, including stopped ones; waiting bags excluded."""
         return len(self.conveyor.baggage)
 
     @property
     def mean_travel_time_s(self) -> float | None:
-        """Media ammissione → uscita, anche errata; None senza campioni.
+        """Mean admission → exit time, wrong exits included; None without samples.
 
-        CLI e GUI potranno visualizzare None come “—”. Si conserva solo la
-        somma dei tempi, non una cronologia crescente dei bagagli usciti.
+        CLI and GUI display None as "—". Only the sum of the times is kept,
+        not a growing history of exited bags.
         """
         if self.exited_count == 0:
             return None
         return self._total_travel_time_s / self.exited_count
 
     def stats(self) -> Stats:
-        """Fotografia dei conteggi al tick corrente, per CLI e GUI."""
+        """Snapshot of the counters at the current tick, for the CLI and GUI."""
         return Stats(
             tick=self.tick,
             time_s=self.time_s,
@@ -95,7 +96,7 @@ class Engine:
         )
 
     def step(self) -> None:
-        """Completa un passo fisso senza consultare il tempo reale o attendere."""
+        """Completes one fixed step without reading real time or waiting."""
         self._tick += 1
         self._move()
         outgoing = self._evaluate_transfers()
@@ -105,17 +106,17 @@ class Engine:
         self._update_entrance_queue()
 
     def _move(self) -> None:
-        """Avanza dall'uscita verso l'ingresso, usando la posizione aggiornata davanti.
+        """Advances from the exit towards the entrance, using the updated position ahead.
 
-        Il bordo anteriore si ferma al termine del nastro o al gap minimo dal
-        bordo posteriore del bagaglio precedente. La rimozione dei bagagli pronti
-        avviene solo dopo aver completato il movimento di tutti i bagagli.
+        The front edge stops at the end of the belt or at the minimum gap from
+        the rear edge of the bag ahead. Ready bags are removed only after every
+        bag has finished moving.
         """
         distance = self.conveyor.config.speed_m_s * STEP_SECONDS
         front_limit = self.conveyor.config.length_m
         for baggage in reversed(self.conveyor.baggage):
             max_position = front_limit - baggage.length_m
-            # max evita piccoli arretramenti dovuti agli arrotondamenti del gap.
+            # max prevents tiny backward moves caused by rounding of the gap.
             baggage.position_m = max(
                 baggage.position_m,
                 min(baggage.position_m + distance, max_position),
@@ -123,11 +124,11 @@ class Engine:
             front_limit = baggage.position_m - self.config.min_gap_m
 
     def _evaluate_transfers(self) -> tuple[Baggage, ...]:
-        """Seleziona l'uscita senza mutare lo stato osservato dopo il movimento.
+        """Selects the exit without mutating the state observed after movement.
 
-        Nel percorso minimo solo il bagaglio più a valle può uscire. Il limite
-        usa la stessa sottrazione del movimento, evitando confronti incoerenti
-        per arrotondamento. Nessun epsilon anticipa l'uscita.
+        On the minimal route only the most downstream bag can exit. The limit
+        uses the same subtraction as movement, avoiding inconsistent comparisons
+        due to rounding. No epsilon brings the exit forward.
         """
         if not self.conveyor.baggage:
             return ()
@@ -137,16 +138,16 @@ class Engine:
         return ()
 
     def _apply_transfers(self, outgoing: tuple[Baggage, ...]) -> None:
-        """Applica una sola volta il risultato della valutazione del tick.
+        """Applies the result of the tick's evaluation exactly once.
 
-        L'uscita scarica automaticamente. Non si ripete il movimento dopo il
-        trasferimento: chi segue sfrutta lo spazio liberato dal prossimo tick.
-        Anche un nuovo ammesso a fine nastro attende il tick successivo.
+        The output unloads automatically. Movement is not repeated after the
+        transfer: following bags use the freed space from the next tick.
+        A newly admitted bag at the end of the belt also waits for the next tick.
         """
         self.exited_this_tick = outgoing
         for baggage in outgoing:
             if baggage.entered_at_s is None:
-                raise ValueError("Un bagaglio in uscita deve essere stato ammesso")
+                raise ValueError("An exiting bag must have been admitted")
             self.conveyor.baggage.pop()
             baggage.conveyor_id = None
             baggage.exited_at_s = self.time_s
@@ -157,12 +158,12 @@ class Engine:
             self._total_travel_time_s += self.time_s - baggage.entered_at_s
 
     def _generate(self) -> None:
-        """Accoda tutti gli arrivi dovuti, senza perdere domanda se il nastro è pieno.
+        """Queues every due arrival, without losing demand when the belt is full.
 
-        Il totale deriva dal tempo trascorso, senza arrotondare un intervallo
-        ai tick né accumulare frazioni a ogni passo. Il primo arrivo avviene
-        dopo un intervallo completo. Il timestamp è quello del tick in cui
-        l'arrivo viene rilevato (ritardo inferiore a un passo).
+        The total is derived from elapsed time, without rounding an interval
+        to ticks or accumulating fractions at every step. The first arrival
+        happens after a full interval. The timestamp is that of the tick in
+        which the arrival is detected (a delay shorter than one step).
         """
         due_count = int(self.tick * STEP_MS * self.config.arrival_rate_bags_s / 1000)
         while self.generated_count < due_count:
@@ -175,11 +176,11 @@ class Engine:
             ))
 
     def _admit(self) -> None:
-        """Ammette il primo bagaglio in attesa se l'ingresso è libero.
+        """Admits the first waiting bag if the entrance is free.
 
-        La lista del nastro è ordinata dall'ingresso all'uscita: il primo
-        elemento è il più vicino al nuovo bagaglio. Basta una ammissione per
-        tick perché il nuovo bagaglio occupa subito la posizione zero.
+        The belt list is ordered from entrance to exit: the first element is
+        the closest to the new bag. One admission per tick is enough because
+        the new bag immediately occupies position zero.
         """
         if not self.waiting:
             return
@@ -198,19 +199,19 @@ class Engine:
         self.admitted_count += 1
 
     def _update_entrance_queue(self) -> None:
-        """Registra inizio e fine della coda all'ingresso, non ogni tick di attesa.
+        """Records the start and end of the entrance queue, not every waiting tick.
 
-        La coda esiste quando, dopo l'ammissione, resta almeno un bagaglio in
-        attesa. È un evento informativo: il warning di attesa prolungata avrà
-        soglie proprie.
+        The queue exists when at least one bag is still waiting after
+        admission. It is an informational event: the prolonged-wait warning
+        will have its own thresholds.
         """
         queued = bool(self.waiting)
         if queued == self._entrance_queued:
             return
         self._entrance_queued = queued
         if queued:
-            kind, message = "entrance_queue_started", "Coda all'ingresso: nastro senza spazio"
+            kind, message = "entrance_queue_started", "Entrance queue: no space on the belt"
         else:
-            kind, message = "entrance_queue_cleared", "Coda all'ingresso smaltita"
+            kind, message = "entrance_queue_cleared", "Entrance queue cleared"
         self.events.record(self.tick, self.time_s, Severity.INFO, kind, message,
                            element_id=self.config.input_id)
