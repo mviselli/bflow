@@ -25,8 +25,8 @@ on every tick. A command-line run prints the summary without a browser. A
 first FastAPI server owns the engine, advances it in real time, streams the
 route layout and state snapshots, and accepts start, pause, and resume commands
 over a WebSocket. The page draws the belt and the bags from these snapshots,
-with start, pause, and resume buttons and the engine counters; the graphics are
-still temporary shapes.
+with start, pause, and resume buttons and the engine counters. The graphics
+are drawn in code, with textures, shadows, and several suitcase styles.
 
 ## Requirements
 
@@ -64,16 +64,19 @@ npm --prefix frontend run dev
 Open the address printed by Vite, usually
 [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite forwards the page's
 `/ws` and `/api` requests to the Python server on port 8000 and updates the
-page when JavaScript or CSS changes. The page shows the belt from the input to
-the output, with a metre scale and each bag drawn at the position and length
-computed by the engine. **Start** runs the simulation, **Pause** freezes it,
+page when JavaScript or CSS changes. The page shows a top-down view of the
+route: a check-in desk, the belt with its rails and drums, and an output chute
+on a terminal floor. Each suitcase is drawn at the position and length computed
+by the engine, with a style and colour that depend on its identifier and a tag
+showing its destination. **Start** runs the simulation, **Pause** freezes it,
 and **Resume** continues from the same instant; the simulated time and the
 engine counters are shown as the server sends them. If the Python server is
 not running, the page shows that it is disconnected and retries every second.
 Both servers listen only on the local machine; stop them with `Ctrl+C`.
 
 Run the frontend tests, which check the conversion from metres to screen
-coordinates, with `npm --prefix frontend test`.
+coordinates and how suitcases are labelled and styled, with
+`npm --prefix frontend test`.
 
 To check the Python environment:
 

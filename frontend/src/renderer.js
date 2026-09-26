@@ -1,101 +1,139 @@
 // Draws the route with PixiJS from the server's layout and snapshots.
 //
-// Temporary shapes: a belt, a metre scale and one rectangle per bag. Every
-// coordinate goes through geometry.js; the renderer never invents movement,
-// it redraws the bags where the latest snapshot says they are.
+// Layers, bottom to top: the floor (tiles, desk, chute, signs, shadows), the
+// belt surface, the belt frame (rails and drums) and the bags. The textures
+// come from assets.js and are rebuilt when the layout or the screen size
+// changes. Every position goes through geometry.js; the renderer never
+// invents movement, it places the bags where the latest snapshot says.
 
-import { Container, Graphics, Text } from 'pixi.js';
-import { baggageRect, beltGeometry } from './geometry.js';
-
-const COLORS = {
-  belt: 0x2b3a47,
-  beltEdge: 0x8fa3b3,
-  arrow: 0x3f5566,
-  scale: 0x5d7486,
-  baggage: 0xd9a441,
-  baggageEdge: 0x5a3f0f,
-  label: 0xaebfce,
-};
-
-function label(text = '', size = 14) {
-  return new Text({ text, style: { fill: COLORS.label, fontFamily: 'system-ui, sans-serif', fontSize: size } });
-}
+import { Container, Sprite, TilingSprite } from 'pixi.js';
+import {
+  BAG_PADDING_M, BELT, beltSurfaceCanvas, floorCanvas, frameCanvas, suitcaseCanvas, toTexture,
+} from './assets.js';
+import { BAGGAGE_WIDTH_M, baggageRect, beltGeometry } from './geometry.js';
+import { hashString, shortCode, suitcaseLook } from './looks.js';
 
 export function createRenderer(app) {
-  const belt = new Graphics();
-  const bags = new Graphics();
-  const inputLabel = label();
-  const outputLabel = label();
-  const scaleStart = label('0 m', 12);
-  const scaleEnd = label('', 12);
-  const scene = new Container();
-  scene.addChild(belt, bags, inputLabel, outputLabel, scaleStart, scaleEnd);
-  app.stage.addChild(scene);
+  const floor = new Sprite();
+  const surface = new TilingSprite();
+  const frame = new Sprite();
+  const bagLayer = new Container();
+  app.stage.addChild(floor, surface, frame, bagLayer);
 
   let layout = null;
   let snapshot = null;
+  let geometry = null;
+  let resolution = 1;
+  let sceneTextures = [];
+  const bagSprites = new Map();   // bag id → sprite on screen
+  const bagTextures = new Map();  // look → texture shared by bags that look alike
 
-  function drawBelt(geometry, conveyor) {
-    const { startX, endX, beltTop, beltHeight, centreY } = geometry;
-    belt.clear();
-    belt.rect(startX, beltTop, endX - startX, beltHeight).fill(COLORS.belt);
-    belt.moveTo(startX, beltTop).lineTo(endX, beltTop)
-      .moveTo(startX, beltTop + beltHeight).lineTo(endX, beltTop + beltHeight)
-      .stroke({ color: COLORS.beltEdge, width: 2 });
-
-    // Direction chevrons every metre, pointing towards the output.
-    const size = beltHeight * 0.18;
-    for (let m = 0.5; m < conveyor.length_m; m += 1) {
-      const x = geometry.positionToX(m);
-      belt.moveTo(x - size / 2, centreY - size).lineTo(x + size / 2, centreY)
-        .lineTo(x - size / 2, centreY + size);
-    }
-    belt.stroke({ color: COLORS.arrow, width: 3 });
-
-    // Metre scale under the belt: one tick per metre.
-    const scaleY = beltTop + beltHeight + 10;
-    for (let m = 0; m <= conveyor.length_m; m += 1) {
-      const x = geometry.positionToX(m);
-      belt.moveTo(x, scaleY).lineTo(x, scaleY + (m % 5 === 0 ? 10 : 5));
-    }
-    belt.moveTo(startX, scaleY).lineTo(endX, scaleY).stroke({ color: COLORS.scale, width: 1 });
-
-    scaleStart.position.set(startX - scaleStart.width / 2, scaleY + 12);
-    scaleEnd.text = `${conveyor.length_m} m`;
-    scaleEnd.position.set(endX - scaleEnd.width / 2, scaleY + 12);
-    inputLabel.text = layout.input_id;
-    inputLabel.position.set(startX - inputLabel.width - 8, centreY - inputLabel.height / 2);
-    outputLabel.text = layout.output_id;
-    outputLabel.position.set(endX + 8, centreY - outputLabel.height / 2);
+  function sceneTexture(canvas) {
+    const texture = toTexture(canvas);
+    sceneTextures.push(texture);
+    return texture;
   }
 
-  function drawBaggage(geometry) {
-    bags.clear();
-    if (!snapshot) return;
-    for (const baggage of snapshot.baggage) {
-      const { x, y, width, height } = baggageRect(geometry, baggage);
-      bags.roundRect(x, y, width, height, Math.min(width, height) * 0.15)
-        .fill(COLORS.baggage)
-        .stroke({ color: COLORS.baggageEdge, width: 2 });
+  function clearBags() {
+    for (const sprite of bagSprites.values()) sprite.destroy();
+    bagSprites.clear();
+    for (const texture of bagTextures.values()) texture.destroy(true);
+    bagTextures.clear();
+  }
+
+  // Redraws every texture for the current layout and screen size.
+  function buildScene() {
+    const old = sceneTextures;
+    sceneTextures = [];
+    clearBags();
+
+    resolution = app.renderer.resolution;
+    const { width, height } = app.screen;
+    const lengthM = layout.conveyors[0].length_m;
+    geometry = beltGeometry(lengthM, width, height);
+    const common = { geometry, screenWidth: width, screenHeight: height, resolution, lengthM };
+
+    floor.texture = sceneTexture(floorCanvas({
+      ...common, inputCode: shortCode(layout.input_id), outputCode: shortCode(layout.output_id),
+    }));
+    frame.texture = sceneTexture(frameCanvas(common));
+    // Textures are drawn at device resolution; scaling by 1/resolution gives CSS pixels.
+    floor.scale.set(1 / resolution);
+    frame.scale.set(1 / resolution);
+
+    surface.texture = sceneTexture(beltSurfaceCanvas(geometry.pixelsPerMetre * resolution));
+    surface.tileScale.set(1 / resolution);
+    surface.position.set(geometry.startX, geometry.centreY - geometry.toPixels(BELT.surfaceM) / 2);
+    surface.width = geometry.toPixels(lengthM);
+    surface.height = geometry.toPixels(BELT.surfaceM);
+
+    for (const texture of old) texture.destroy(true);
+  }
+
+  function bagTexture(baggage) {
+    const look = suitcaseLook(baggage);
+    const key = `${look.style}|${look.colour}|${look.label}|${baggage.length_m}`;
+    if (!bagTextures.has(key)) {
+      bagTextures.set(key, toTexture(suitcaseCanvas({
+        ...look,
+        lengthM: baggage.length_m,
+        widthM: BAGGAGE_WIDTH_M,
+        scale: geometry.pixelsPerMetre * resolution,
+        seed: hashString(key),
+      })));
+    }
+    return bagTextures.get(key);
+  }
+
+  function placeBaggage() {
+    const present = new Set();
+    const padding = geometry.toPixels(BAG_PADDING_M);
+    for (const baggage of snapshot ? snapshot.baggage : []) {
+      present.add(baggage.id);
+      let sprite = bagSprites.get(baggage.id);
+      if (!sprite) {
+        sprite = new Sprite(bagTexture(baggage));
+        sprite.scale.set(1 / resolution);
+        bagSprites.set(baggage.id, sprite);
+        bagLayer.addChild(sprite);
+      }
+      // The texture has room for the shadow around the bag itself.
+      const rect = baggageRect(geometry, baggage);
+      sprite.position.set(rect.x - padding, rect.y - padding);
+    }
+    for (const [id, sprite] of bagSprites) {
+      if (!present.has(id)) {
+        sprite.destroy();
+        bagSprites.delete(id);
+      }
     }
   }
 
   function draw() {
     if (!layout) return;
-    const conveyor = layout.conveyors[0];
-    const geometry = beltGeometry(conveyor.length_m, app.screen.width, app.screen.height);
-    drawBelt(geometry, conveyor);
-    drawBaggage(geometry);
+    if (!geometry) buildScene();
+    placeBaggage();
     app.render();
   }
 
-  app.renderer.on('resize', draw);
+  // Resizing fires many events: rebuild the textures at most once per frame.
+  let resizePending = false;
+  app.renderer.on('resize', () => {
+    if (resizePending) return;
+    resizePending = true;
+    requestAnimationFrame(() => {
+      resizePending = false;
+      geometry = null;
+      draw();
+    });
+  });
 
   return {
     // A new layout arrives on every (re)connection: forget the old state.
     setLayout(newLayout) {
       layout = newLayout;
       snapshot = null;
+      geometry = null;
       draw();
     },
     setSnapshot(newSnapshot) {
