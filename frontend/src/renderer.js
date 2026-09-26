@@ -3,8 +3,12 @@
 // Layers, bottom to top: the floor (tiles, desk, chute, signs, shadows), the
 // belt surface, the belt frame (rails and drums) and the bags. The textures
 // come from assets.js and are rebuilt when the layout or the screen size
-// changes. Every position goes through geometry.js; the renderer never
-// invents movement, it places the bags where the latest snapshot says.
+// changes. Every position goes through geometry.js.
+//
+// The scene is redrawn on every screen frame. Snapshots go to playback.js,
+// which gives the simulated time to draw and the bags between the two
+// snapshots around it: the renderer never invents movement, and when the
+// simulation is paused the bags and the belt surface stop with it.
 
 import { Container, Sprite, TilingSprite } from 'pixi.js';
 import {
@@ -12,6 +16,12 @@ import {
 } from './assets.js';
 import { BAGGAGE_WIDTH_M, baggageRect, beltGeometry } from './geometry.js';
 import { hashString, shortCode, suitcaseLook } from './looks.js';
+import { beltOffset, createPlayback } from './playback.js';
+
+// Real time in seconds, for the display clock.
+function nowSeconds() {
+  return performance.now() / 1000;
+}
 
 export function createRenderer(app) {
   const floor = new Sprite();
@@ -21,7 +31,7 @@ export function createRenderer(app) {
   app.stage.addChild(floor, surface, frame, bagLayer);
 
   let layout = null;
-  let snapshot = null;
+  const playback = createPlayback();
   let geometry = null;
   let resolution = 1;
   let sceneTextures = [];
@@ -85,10 +95,17 @@ export function createRenderer(app) {
     return bagTextures.get(key);
   }
 
-  function placeBaggage() {
+  // Scrolls the rubber surface by the distance the belt has travelled.
+  function moveSurface(timeS) {
+    const tileWidthM = surface.texture.width / geometry.pixelsPerMetre;
+    const { speed_m_s: speed } = layout.conveyors[0];
+    surface.tilePosition.x = geometry.toPixels(beltOffset(speed, timeS, tileWidthM));
+  }
+
+  function placeBaggage(timeS) {
     const present = new Set();
     const padding = geometry.toPixels(BAG_PADDING_M);
-    for (const baggage of snapshot ? snapshot.baggage : []) {
+    for (const baggage of playback.baggageAt(timeS)) {
       present.add(baggage.id);
       let sprite = bagSprites.get(baggage.id);
       if (!sprite) {
@@ -100,6 +117,7 @@ export function createRenderer(app) {
       // The texture has room for the shadow around the bag itself.
       const rect = baggageRect(geometry, baggage);
       sprite.position.set(rect.x - padding, rect.y - padding);
+      sprite.alpha = baggage.alpha;
     }
     for (const [id, sprite] of bagSprites) {
       if (!present.has(id)) {
@@ -109,36 +127,31 @@ export function createRenderer(app) {
     }
   }
 
-  function draw() {
+  // Called by the PixiJS ticker before each frame is rendered.
+  function update() {
     if (!layout) return;
     if (!geometry) buildScene();
-    placeBaggage();
-    app.render();
+    const timeS = playback.advance(nowSeconds());
+    if (timeS === null) return;
+    moveSurface(timeS);
+    placeBaggage(timeS);
   }
+  app.ticker.add(update);
 
-  // Resizing fires many events: rebuild the textures at most once per frame.
-  let resizePending = false;
+  // Resizing fires many events: rebuild the textures once, on the next frame.
   app.renderer.on('resize', () => {
-    if (resizePending) return;
-    resizePending = true;
-    requestAnimationFrame(() => {
-      resizePending = false;
-      geometry = null;
-      draw();
-    });
+    geometry = null;
   });
 
   return {
     // A new layout arrives on every (re)connection: forget the old state.
     setLayout(newLayout) {
       layout = newLayout;
-      snapshot = null;
+      playback.reset();
       geometry = null;
-      draw();
     },
-    setSnapshot(newSnapshot) {
-      snapshot = newSnapshot;
-      draw();
+    setSnapshot(snapshot) {
+      playback.add(snapshot, nowSeconds());
     },
   };
 }

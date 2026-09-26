@@ -26,7 +26,11 @@ first FastAPI server owns the engine, advances it in real time, streams the
 route layout and state snapshots, and accepts start, pause, and resume commands
 over a WebSocket. The page draws the belt and the bags from these snapshots,
 with start, pause, and resume buttons and the engine counters. The graphics
-are drawn in code, with textures, shadows, and several suitcase styles.
+are drawn in code, with textures, shadows, and several suitcase styles. Bags
+and the belt surface move smoothly: the page draws the simulation a fraction
+of a second behind the newest snapshot and places each bag between the two
+positions the engine reported, so nothing is extrapolated. When paused, the
+bags and the belt stop at the paused instant.
 
 ## Requirements
 
@@ -75,7 +79,8 @@ not running, the page shows that it is disconnected and retries every second.
 Both servers listen only on the local machine; stop them with `Ctrl+C`.
 
 Run the frontend tests, which check the conversion from metres to screen
-coordinates and how suitcases are labelled and styled, with
+coordinates, how suitcases are labelled and styled, and the smooth movement
+between snapshots (including stopping on pause), with
 `npm --prefix frontend test`.
 
 To check the Python environment:

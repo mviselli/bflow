@@ -19,8 +19,6 @@ async function initialize() {
   map.appendChild(app.canvas);
   app.canvas.setAttribute('role', 'img');
   app.canvas.setAttribute('aria-label', 'Baggage belt from the input to the output');
-  // No animation yet: the scene is redrawn only when a snapshot arrives.
-  app.stop();
   status.textContent = 'Connecting to the simulation server…';
 
   const renderer = createRenderer(app);
