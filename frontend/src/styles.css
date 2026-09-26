@@ -21,7 +21,7 @@ canvas { display: block; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
 .toolbar h2 { margin-right: auto; }
 .toolbar p { margin: 0; }
-#time { font-variant-numeric: tabular-nums; color: #e8eef3; }
+#time { min-width: 21ch; text-align: right; font-variant-numeric: tabular-nums; color: #e8eef3; }
 #connection[data-state="connected"] { color: #75d7c0; }
 #connection[data-state="disconnected"] { color: #f0a36b; }
 #status:empty { display: none; }

@@ -77,6 +77,8 @@ and **Resume** continues from the same instant; the simulated time and the
 engine counters are shown as the server sends them. If the Python server is
 not running, the page shows that it is disconnected and retries every second.
 Both servers listen only on the local machine; stop them with `Ctrl+C`.
+To check start, pause, resume, the counters and reconnection by hand, follow
+the [manual checklist](docs/manual-checklist.md).
 
 Run the frontend tests, which check the conversion from metres to screen
 coordinates, how suitcases are labelled and styled, and the smooth movement
