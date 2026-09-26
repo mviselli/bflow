@@ -1,4 +1,7 @@
-import { Application, Graphics } from 'pixi.js';
+import { Application } from 'pixi.js';
+import { connect } from './connection.js';
+import { createControls } from './controls.js';
+import { createRenderer } from './renderer.js';
 import './styles.css';
 
 const map = document.querySelector('#map');
@@ -15,24 +18,28 @@ async function initialize() {
   });
   map.appendChild(app.canvas);
   app.canvas.setAttribute('role', 'img');
-  app.canvas.setAttribute('aria-label', 'Initial graphics area, no plant yet');
-
-  const grid = new Graphics();
-  app.stage.addChild(grid);
-
-  function drawGrid(width, height) {
-    grid.clear();
-    for (let x = 0; x < width; x += 40) grid.moveTo(x, 0).lineTo(x, height);
-    for (let y = 0; y < height; y += 40) grid.moveTo(0, y).lineTo(width, y);
-    grid.stroke({ color: 0x304354, width: 1 });
-    app.render();
-  }
-
-  app.renderer.on('resize', drawGrid);
-  drawGrid(app.screen.width, app.screen.height);
-  // The scene is static: the ticker will be started once there are animations.
+  app.canvas.setAttribute('aria-label', 'Baggage belt from the input to the output');
+  // No animation yet: the scene is redrawn only when a snapshot arrives.
   app.stop();
-  status.textContent = 'Graphics ready · simulation not implemented yet';
+  status.textContent = 'Connecting to the simulation server…';
+
+  const renderer = createRenderer(app);
+  let link = null;
+  const controls = createControls({ onCommand: (command) => link.send(command) });
+
+  link = connect({
+    onConnectionChange(connected) {
+      controls.setConnected(connected);
+      status.textContent = connected ? '' : 'Waiting for the simulation server…';
+    },
+    onMessage(message) {
+      if (message.type === 'layout') renderer.setLayout(message);
+      else if (message.type === 'snapshot') {
+        renderer.setSnapshot(message);
+        controls.setSnapshot(message);
+      } else if (message.type === 'error') console.warn(message.message);
+    },
+  });
 }
 
 initialize().catch((error) => {

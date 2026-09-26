@@ -10,12 +10,17 @@
       <header>
         <p class="eyebrow">Baggage sorting simulator</p>
         <h1>BaggageFlow</h1>
-        <p>Initial environment. The plant and controls will be added in the next steps.</p>
       </header>
       <section aria-labelledby="map-title">
-        <h2 id="map-title">Plant area</h2>
+        <div class="toolbar">
+          <h2 id="map-title">Route</h2>
+          <button id="toggle" type="button" disabled>Start</button>
+          <p id="time" aria-live="off">00:00.00 · tick 0</p>
+          <p id="connection" data-state="disconnected">Connecting…</p>
+        </div>
         <p id="status" role="status">Initializing graphics…</p>
         <div id="map"></div>
+        <dl id="counters" aria-label="Engine counters"></dl>
       </section>
     </main>
     <script type="module" src="/src/main.js"></script>

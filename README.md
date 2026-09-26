@@ -24,8 +24,9 @@ history; an entrance queue is recorded when it starts and when it clears, not
 on every tick. A command-line run prints the summary without a browser. A
 first FastAPI server owns the engine, advances it in real time, streams the
 route layout and state snapshots, and accepts start, pause, and resume commands
-over a WebSocket; the interface does not yet display the simulation or offer
-controls.
+over a WebSocket. The page draws the belt and the bags from these snapshots,
+with start, pause, and resume buttons and the engine counters; the graphics are
+still temporary shapes.
 
 ## Requirements
 
@@ -52,14 +53,27 @@ commands again to synchronize your environment with the lockfiles.
 
 ## Development
 
+Development uses two processes, each in its own terminal: the Python
+simulation server and the Vite development server for the page.
+
 ```sh
+uv run uvicorn bflow.server.app:app
 npm --prefix frontend run dev
 ```
 
-Open the address printed in the terminal, usually
-[http://127.0.0.1:5173](http://127.0.0.1:5173). Vite updates the page when
-JavaScript or CSS changes. The server listens only on the local machine;
-stop it with `Ctrl+C`.
+Open the address printed by Vite, usually
+[http://127.0.0.1:5173](http://127.0.0.1:5173). Vite forwards the page's
+`/ws` and `/api` requests to the Python server on port 8000 and updates the
+page when JavaScript or CSS changes. The page shows the belt from the input to
+the output, with a metre scale and each bag drawn at the position and length
+computed by the engine. **Start** runs the simulation, **Pause** freezes it,
+and **Resume** continues from the same instant; the simulated time and the
+engine counters are shown as the server sends them. If the Python server is
+not running, the page shows that it is disconnected and retries every second.
+Both servers listen only on the local machine; stop them with `Ctrl+C`.
+
+Run the frontend tests, which check the conversion from metres to screen
+coordinates, with `npm --prefix frontend test`.
 
 To check the Python environment:
 
@@ -117,8 +131,8 @@ Commands go the other way: `{"type": "start"}` starts the simulation or
 resumes it after a pause, and `{"type": "pause"}` freezes simulated time.
 Commands are applied even while paused, and repeating one has no effect. An
 invalid command receives an `{"type": "error", "message": ...}` reply and the
-connection stays open. Buttons in the interface are not yet connected; to try
-the commands, open the browser developer console on any page and run:
+connection stays open. The page's buttons send these commands; to send them by
+hand, open the browser developer console on any page and run:
 
 ```js
 const ws = new WebSocket("ws://127.0.0.1:8000/ws");
