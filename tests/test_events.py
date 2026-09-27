@@ -4,7 +4,8 @@ import pytest
 
 from bflow.core.engine import Engine
 from bflow.core.events import EventLog, Severity
-from bflow.core.models import Baggage, ConveyorConfig, SimulationConfig
+from bflow.core.layout import minimal_layout
+from bflow.core.models import Baggage
 
 
 def test_ids_are_progressive_and_counts_survive_the_bounded_history():
@@ -50,29 +51,27 @@ def test_normal_flow_produces_no_events():
 
 
 def test_blocked_entrance_records_the_queue_once(monkeypatch):
-    engine = Engine(SimulationConfig(
-        conveyor=ConveyorConfig(length_m=0.6), arrival_rate_bags_s=10,
-    ))
+    engine = Engine(minimal_layout(length_m=0.6, arrival_rate_bags_s=10))
     monkeypatch.setattr(engine, "_evaluate_transfers", lambda: ())
     for _ in range(200):
         engine.step()
-    assert len(engine.waiting) == 99
+    assert engine.waiting_count == 99
     (event,) = engine.events.recent
     assert event.kind == "entrance_queue_started"
     assert event.severity is Severity.INFO
-    assert event.element_id == engine.config.input_id
+    assert event.element_id == "input-a"
     assert (event.id, event.tick, event.time_s) == (1, 4, 0.2)
 
 
 def test_queue_start_and_clear_are_recorded_at_the_changing_ticks():
-    engine = Engine(SimulationConfig(arrival_rate_bags_s=0))
+    engine = Engine(minimal_layout(arrival_rate_bags_s=0))
     for i in range(3):
-        engine.waiting.append(Baggage(f"bag-{i}", engine.config.output_id, 0.6, 0))
+        engine.waiting["input-a"].append(Baggage(f"bag-{i}", "output-1", 0.6, 0))
     engine.generated_count = 3
     ticks_with_queue = []
     for _ in range(100):
         engine.step()
-        if engine.waiting:
+        if engine.waiting_count:
             ticks_with_queue.append(engine.tick)
     started, cleared = engine.events.recent
     assert (started.kind, cleared.kind) == ("entrance_queue_started", "entrance_queue_cleared")
@@ -83,8 +82,8 @@ def test_queue_start_and_clear_are_recorded_at_the_changing_ticks():
 
 
 def test_events_are_independent_between_runs(monkeypatch):
-    config = SimulationConfig(conveyor=ConveyorConfig(length_m=0.6), arrival_rate_bags_s=10)
-    first, second = Engine(config), Engine(config)
+    layout = minimal_layout(length_m=0.6, arrival_rate_bags_s=10)
+    first, second = Engine(layout), Engine(layout)
     monkeypatch.setattr(first, "_evaluate_transfers", lambda: ())
     for _ in range(10):
         first.step()

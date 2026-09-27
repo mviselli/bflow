@@ -1,22 +1,25 @@
 """Simulated clock and per-run randomness."""
 
 import random
+from collections import deque
 
 import pytest
 
 from bflow.core.engine import Engine, STEP_SECONDS
-from bflow.core.models import ConveyorConfig, SimulationConfig
+from bflow.core.layout import minimal_layout
 
 
 def test_initial_state_uses_the_supplied_configuration():
-    config = SimulationConfig(conveyor=ConveyorConfig(length_m=20))
-    engine = Engine(config, seed=7)
+    layout = minimal_layout(length_m=20)
+    engine = Engine(layout, seed=7)
     assert engine.tick == 0
     assert engine.time_s == 0
     assert engine.seed == 7
-    assert engine.config is config
-    assert engine.conveyor.config is config.conveyor
-    assert engine.conveyor.baggage == []
+    assert engine.layout is layout
+    assert engine.conveyors["belt-1"].config is layout.belts[0]
+    assert engine.conveyors["belt-1"].baggage == []
+    assert engine.input_conveyors == {"input-a": engine.conveyors["belt-1"]}
+    assert engine.waiting == {"input-a": deque()}
 
 
 def test_each_step_is_fifty_simulated_milliseconds():
@@ -46,7 +49,7 @@ def test_grouping_steps_does_not_change_simulated_state():
             grouped.step()
     assert single.tick == grouped.tick == 100
     assert single.time_s == grouped.time_s == 5
-    assert single.conveyor == grouped.conveyor
+    assert single.conveyors == grouped.conveyors
     assert single.rng.getstate() == grouped.rng.getstate()
 
 

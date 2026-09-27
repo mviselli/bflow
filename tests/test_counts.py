@@ -3,40 +3,41 @@
 import pytest
 
 from bflow.core.engine import Engine
-from bflow.core.models import Baggage, ConveyorConfig, SimulationConfig
+from bflow.core.layout import minimal_layout
+from bflow.core.models import Baggage
 
 
 def test_no_completed_journey_has_no_mean_even_with_waiting_and_transit():
-    engine = Engine(SimulationConfig(arrival_rate_bags_s=60))
+    engine = Engine(minimal_layout(arrival_rate_bags_s=60))
     assert engine.mean_travel_time_s is None
     assert engine.in_transit_count == engine.exited_count == 0
     engine.step()
-    assert len(engine.waiting) == 2
+    assert engine.waiting_count == 2
     assert engine.in_transit_count == 1
     assert engine.correctly_delivered_count == engine.misdelivered_count == 0
     assert engine.mean_travel_time_s is None
 
 
 def test_known_journey_times_exclude_waiting_and_include_wrong_exit():
-    engine = Engine(SimulationConfig(arrival_rate_bags_s=0))
+    engine = Engine(minimal_layout(arrival_rate_bags_s=0))
     for _ in range(100):
         engine.step()
     # Two bags with different admission times, both at the end of the belt.
-    correct = Baggage('first', engine.config.output_id, 0.6, 0,
-                      engine.config.conveyor.id, 9.4, entered_at_s=2)
-    engine.conveyor.baggage.append(correct)
+    correct = Baggage('first', "output-1", 0.6, 0,
+                      "belt-1", 9.4, entered_at_s=2)
+    engine.conveyors["belt-1"].baggage.append(correct)
     engine.step()
     assert engine.mean_travel_time_s == pytest.approx(3.05)
     wrong = Baggage('second', 'another-output', 0.6, 0,
-                    engine.config.conveyor.id, 9.4, entered_at_s=4)
-    engine.conveyor.baggage.append(wrong)
+                    "belt-1", 9.4, entered_at_s=4)
+    engine.conveyors["belt-1"].baggage.append(wrong)
     engine.step()
     assert engine.correctly_delivered_count == 1
     assert engine.misdelivered_count == 1
     assert engine.exited_count == 2
     assert engine.in_transit_count == 0
     assert engine.mean_travel_time_s == pytest.approx((3.05 + 1.10) / 2)
-    assert correct.destination_id == engine.config.output_id
+    assert correct.destination_id == "output-1"
     assert wrong.destination_id == 'another-output'
     engine.step()
     assert engine.exited_this_tick == ()
@@ -45,9 +46,7 @@ def test_known_journey_times_exclude_waiting_and_include_wrong_exit():
 
 
 def test_actual_queue_wait_does_not_enter_mean_and_counts_conserve_each_tick():
-    engine = Engine(SimulationConfig(
-        conveyor=ConveyorConfig(length_m=2), arrival_rate_bags_s=10,
-    ))
+    engine = Engine(minimal_layout(length_m=2, arrival_rate_bags_s=10))
     durations = []
     waited = False
     for _ in range(12000):
@@ -58,7 +57,7 @@ def test_actual_queue_wait_does_not_enter_mean_and_counts_conserve_each_tick():
         assert engine.admitted_count == (
             engine.correctly_delivered_count + engine.misdelivered_count + engine.in_transit_count
         )
-        assert engine.generated_count == engine.admitted_count + len(engine.waiting)
+        assert engine.generated_count == engine.admitted_count + engine.waiting_count
         if durations:
             assert engine.mean_travel_time_s == pytest.approx(sum(durations) / len(durations))
         else:
@@ -69,8 +68,8 @@ def test_actual_queue_wait_does_not_enter_mean_and_counts_conserve_each_tick():
 
 
 def test_counts_and_mean_are_independent_between_runs():
-    config = SimulationConfig(conveyor=ConveyorConfig(length_m=0.6), arrival_rate_bags_s=20)
-    first, second = Engine(config), Engine(config)
+    layout = minimal_layout(length_m=0.6, arrival_rate_bags_s=20)
+    first, second = Engine(layout), Engine(layout)
     first.step()
     first.step()
     assert first.exited_count == 1

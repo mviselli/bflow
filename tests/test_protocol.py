@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from bflow.core.engine import STEP_MS, Engine
 from bflow.core.events import Severity
-from bflow.core.models import ConveyorConfig, SimulationConfig
+from bflow.core.layout import default_layout, minimal_layout
 from bflow.server.protocol import (
     ErrorMessage,
     LayoutMessage,
@@ -79,12 +79,16 @@ def test_initial_layout_describes_the_default_route():
 
 
 def test_layout_follows_a_custom_configuration():
-    config = SimulationConfig(conveyor=ConveyorConfig(id="belt-x", length_m=4.0, speed_m_s=0.5),
-                              baggage_length_m=0.8, min_gap_m=0.0)
+    config = minimal_layout(length_m=4.0, speed_m_s=0.5, baggage_length_m=0.8, min_gap_m=0.0)
     layout = layout_message(run(Engine(config), 3))
     assert (layout.tick, layout.time_s) == (3, 0.15)
-    assert layout.conveyors[0].model_dump() == {"id": "belt-x", "length_m": 4.0, "speed_m_s": 0.5}
+    assert layout.conveyors[0].model_dump() == {"id": "belt-1", "length_m": 4.0, "speed_m_s": 0.5}
     assert (layout.baggage_length_m, layout.min_gap_m) == (0.8, 0.0)
+
+
+def test_layout_message_refuses_a_plant_the_page_cannot_draw_yet():
+    with pytest.raises(ValueError, match="one-belt route"):
+        layout_message(Engine(default_layout()))
 
 
 @pytest.mark.parametrize(("tick", "time_s"), [(1, 0.0), (0, 0.05), (20, 1.05)])
@@ -131,7 +135,7 @@ def test_snapshot_bags_match_the_belt_in_order():
     assert [(b.id, b.conveyor_id, b.position_m, b.length_m, b.destination_id)
             for b in snapshot.baggage] == [
         (b.id, b.conveyor_id, b.position_m, b.length_m, b.destination_id)
-        for b in engine.conveyor.baggage
+        for b in engine.conveyors["belt-1"].baggage
     ]
     assert snapshot.baggage
 
@@ -157,7 +161,7 @@ def test_snapshot_carries_only_new_events():
 
 
 def test_snapshot_round_trips_through_json():
-    engine = run(Engine(SimulationConfig(arrival_rate_bags_s=5.0)), 200)
+    engine = run(Engine(minimal_layout(arrival_rate_bags_s=5.0)), 200)
     snapshot = snapshot_message(engine, running=True)
     assert snapshot.events  # the entrance queue has started
     data = json.loads(snapshot.model_dump_json())

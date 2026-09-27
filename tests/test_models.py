@@ -4,7 +4,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from bflow.core.models import Baggage, Conveyor, ConveyorConfig, SimulationConfig
+from bflow.core.layout import minimal_layout
+from bflow.core.models import Baggage, Conveyor
 
 
 def test_waiting_transit_and_exit_keep_simulated_times_distinct():
@@ -22,21 +23,10 @@ def test_waiting_transit_and_exit_keep_simulated_times_distinct():
 
 
 def test_conveyors_do_not_share_mutable_contents():
-    config = ConveyorConfig()
+    config = minimal_layout().belts[0]
     first, second = Conveyor(config), Conveyor(config)
     first.baggage.append(Baggage("bag-1", "output-1", 0.6, 0, config.id, entered_at_s=0))
     assert second.baggage == []
-    with pytest.raises(FrozenInstanceError):
-        config.speed_m_s = 2
-    with pytest.raises(FrozenInstanceError):
-        SimulationConfig().min_gap_m = 1
-
-
-@pytest.mark.parametrize("value", [-1, float("nan"), float("inf"), -float("inf")])
-@pytest.mark.parametrize("field", ["length_m", "speed_m_s"])
-def test_invalid_conveyor_physics(field, value):
-    with pytest.raises(ValueError, match=field):
-        ConveyorConfig(**{field: value})
 
 
 @pytest.mark.parametrize("fields", [
@@ -54,24 +44,3 @@ def test_invalid_baggage_lifecycle(fields):
     values = dict(id="bag-1", destination_id="output-1", length_m=0.6, generated_at_s=2)
     with pytest.raises(ValueError):
         Baggage(**(values | fields))
-
-
-@pytest.mark.parametrize("fields", [
-    {"input_id": ""}, {"output_id": "input-a"}, {"input_id": "belt-1"},
-    {"arrival_rate_bags_s": -1}, {"arrival_rate_bags_s": float("inf")},
-    {"min_gap_m": -0.1}, {"baggage_length_m": 0}, {"baggage_length_m": 11},
-])
-def test_invalid_minimal_configuration(fields):
-    with pytest.raises(ValueError):
-        SimulationConfig(**fields)
-
-
-def test_boundary_configuration_allows_no_arrivals_no_gap_and_exact_fit():
-    config = SimulationConfig(arrival_rate_bags_s=0, min_gap_m=0, baggage_length_m=10)
-    assert config.baggage_length_m == config.conveyor.length_m
-
-
-@pytest.mark.parametrize("field", ["length_m", "speed_m_s"])
-def test_conveyor_requires_positive_dimensions_and_nominal_speed(field):
-    with pytest.raises(ValueError, match=field):
-        ConveyorConfig(**{field: 0})

@@ -3,20 +3,18 @@
 import pytest
 
 from bflow.core.engine import Engine
-from bflow.core.models import Baggage, ConveyorConfig, SimulationConfig
+from bflow.core.layout import minimal_layout
+from bflow.core.models import Baggage
 
 
 def make_engine(speed=1, gap=0.2, length=10):
-    return Engine(SimulationConfig(
-        conveyor=ConveyorConfig(length_m=length, speed_m_s=speed),
-        arrival_rate_bags_s=0, min_gap_m=gap,
-    ))
+    return Engine(minimal_layout(length_m=length, speed_m_s=speed, arrival_rate_bags_s=0, min_gap_m=gap))
 
 
 def place(engine, identifier, position, length=0.6):
-    bag = Baggage(identifier, engine.config.output_id, length, 0,
-                  engine.conveyor.config.id, position, entered_at_s=0)
-    engine.conveyor.baggage.append(bag)
+    bag = Baggage(identifier, "output-1", length, 0,
+                  "belt-1", position, entered_at_s=0)
+    engine.conveyors["belt-1"].baggage.append(bag)
     return bag
 
 
@@ -31,9 +29,9 @@ def test_free_baggage_moves_by_speed_times_simulated_time(speed):
 
 
 def test_newly_admitted_baggage_moves_only_on_next_tick():
-    engine = Engine(SimulationConfig(arrival_rate_bags_s=20))
+    engine = Engine(minimal_layout(arrival_rate_bags_s=20))
     engine.step()
-    bag = engine.conveyor.baggage[0]
+    bag = engine.conveyors["belt-1"].baggage[0]
     assert bag.position_m == 0
     engine.step()
     assert bag.position_m == pytest.approx(0.05)
@@ -48,10 +46,10 @@ def test_large_step_stops_at_end_and_propagates_queue_with_mixed_lengths():
     assert front.position_m == pytest.approx(9.1)
     assert middle.position_m == pytest.approx(8.5)
     assert rear.position_m == pytest.approx(7.1)
-    positions = [b.position_m for b in engine.conveyor.baggage]
+    positions = [b.position_m for b in engine.conveyors["belt-1"].baggage]
     engine._move()
-    assert [b.position_m for b in engine.conveyor.baggage] == positions
-    assert [b.id for b in engine.conveyor.baggage] == ['rear', 'middle', 'front']
+    assert [b.position_m for b in engine.conveyors["belt-1"].baggage] == positions
+    assert [b.id for b in engine.conveyors["belt-1"].baggage] == ['rear', 'middle', 'front']
 
 
 def test_tightly_spaced_bags_use_space_freed_in_same_tick():
@@ -65,12 +63,12 @@ def test_tightly_spaced_bags_use_space_freed_in_same_tick():
 
 @pytest.mark.parametrize('gap', [0, 0.2, 0.7])
 def test_long_run_preserves_bounds_order_spacing_and_counts_every_tick(gap):
-    engine = Engine(SimulationConfig(arrival_rate_bags_s=20, min_gap_m=gap))
+    engine = Engine(minimal_layout(arrival_rate_bags_s=20, min_gap_m=gap))
     previous = {}
     for _ in range(2000):
         engine.step()
-        bags = engine.conveyor.baggage
-        assert engine.generated_count == engine.admitted_count + len(engine.waiting)
+        bags = engine.conveyors["belt-1"].baggage
+        assert engine.generated_count == engine.admitted_count + engine.waiting_count
         assert engine.admitted_count == engine.exited_count + len(bags)
         assert len({b.id for b in bags}) == len(bags)
         for bag in bags:
@@ -82,11 +80,11 @@ def test_long_run_preserves_bounds_order_spacing_and_counts_every_tick(gap):
             assert rear.position_m + rear.length_m + gap <= front.position_m + 1e-12
             assert int(rear.id.split('-')[1]) > int(front.id.split('-')[1])
         previous = {b.id: b.position_m for b in bags}
-    assert len(engine.waiting) > 0
+    assert engine.waiting_count > 0
     assert engine.exited_count > 0
 
 
 def test_empty_belt_can_step():
     engine = make_engine()
     engine.step()
-    assert engine.conveyor.baggage == []
+    assert engine.conveyors["belt-1"].baggage == []

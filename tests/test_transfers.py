@@ -5,20 +5,18 @@ from copy import deepcopy
 import pytest
 
 from bflow.core.engine import Engine
-from bflow.core.models import Baggage, ConveyorConfig, SimulationConfig
+from bflow.core.layout import minimal_layout
+from bflow.core.models import Baggage
 
 
 def make_engine(length=1, speed=1, rate=0):
-    return Engine(SimulationConfig(
-        conveyor=ConveyorConfig(length_m=length, speed_m_s=speed),
-        arrival_rate_bags_s=rate,
-    ))
+    return Engine(minimal_layout(length_m=length, speed_m_s=speed, arrival_rate_bags_s=rate))
 
 
 def place(engine, name, position):
-    bag = Baggage(name, engine.config.output_id, 0.6, 0,
-                  engine.config.conveyor.id, position, entered_at_s=0)
-    engine.conveyor.baggage.append(bag)
+    bag = Baggage(name, "output-1", 0.6, 0,
+                  "belt-1", position, entered_at_s=0)
+    engine.conveyors["belt-1"].baggage.append(bag)
     return bag
 
 
@@ -26,10 +24,10 @@ def place(engine, name, position):
 def test_evaluation_is_read_only_and_does_not_exit_early(offset, ready):
     engine = make_engine()
     bag = place(engine, 'bag-1', 0.4 + offset)
-    before = deepcopy(engine.conveyor)
+    before = deepcopy(engine.conveyors)
     selected = engine._evaluate_transfers()
     assert bool(selected) == ready
-    assert engine.conveyor == before
+    assert engine.conveyors == before
     assert bag.exited_at_s is None
     assert engine.exited_count == 0
     assert engine.exited_this_tick == ()
@@ -41,12 +39,12 @@ def test_exit_sets_timestamp_and_is_not_repeated():
     bag = place(engine, 'bag-1', 0.38)
     engine.step()
     assert engine.exited_this_tick == (bag,)
-    assert engine.conveyor.baggage == []
+    assert engine.conveyors["belt-1"].baggage == []
     assert bag.position_m == 0.4
     assert bag.conveyor_id is None
     assert bag.exited_at_s == 0.05
     assert bag.entered_at_s == 0
-    assert bag.destination_id == engine.config.output_id
+    assert bag.destination_id == "output-1"
     engine.step()
     assert engine.exited_this_tick == ()
     assert engine.exited_count == 1
@@ -60,7 +58,7 @@ def test_departure_does_not_trigger_second_movement_of_follower():
     engine.step()
     assert engine.exited_this_tick == (front,)
     assert rear.position_m == pytest.approx(0.6)
-    assert engine.conveyor.baggage == [rear]
+    assert engine.conveyors["belt-1"].baggage == [rear]
     engine.step()
     assert engine.exited_this_tick == (rear,)
     assert rear.position_m == pytest.approx(1.4)
@@ -69,11 +67,11 @@ def test_departure_does_not_trigger_second_movement_of_follower():
 def test_exact_fit_new_admission_waits_until_next_tick_to_exit():
     engine = make_engine(length=0.6, rate=20)
     engine.step()
-    first = engine.conveyor.baggage[0]
+    first = engine.conveyors["belt-1"].baggage[0]
     assert engine.exited_count == 0
     engine.step()
     assert engine.exited_this_tick == (first,)
-    second = engine.conveyor.baggage[0]
+    second = engine.conveyors["belt-1"].baggage[0]
     assert second.id == 'bag-2'
     assert second.position_m == 0
     assert second.exited_at_s is None
@@ -86,8 +84,8 @@ def test_long_run_has_no_loss_duplicates_or_reordering():
     for _ in range(12000):
         engine.step()
         seen.extend(bag.id for bag in engine.exited_this_tick)
-        assert engine.admitted_count == engine.exited_count + len(engine.conveyor.baggage)
-        assert engine.generated_count == engine.admitted_count + len(engine.waiting)
+        assert engine.admitted_count == engine.exited_count + len(engine.conveyors["belt-1"].baggage)
+        assert engine.generated_count == engine.admitted_count + engine.waiting_count
         assert engine.exited_count == len(seen)
     assert len(seen) > 0
     assert seen == [f'bag-{i}' for i in range(1, len(seen) + 1)]
@@ -105,5 +103,5 @@ def test_grouped_execution_reproduces_departures_and_state():
             second_exits.extend(deepcopy(second.exited_this_tick))
     assert first_exits == second_exits
     assert first.exited_count == second.exited_count > 0
-    assert first.conveyor == second.conveyor
+    assert first.conveyors == second.conveyors
     assert first.waiting == second.waiting

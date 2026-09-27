@@ -28,7 +28,7 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from math import hypot, isfinite
 
-from bflow.core.models import _identifier, _quantity
+from bflow.core.checks import check_identifier, check_quantity
 
 
 @dataclass(frozen=True)
@@ -57,9 +57,9 @@ class InputConfig:
     arrival_rate_bags_s: float
 
     def __post_init__(self) -> None:
-        _identifier("id", self.id)
-        _identifier("label", self.label)
-        _quantity("arrival_rate_bags_s", self.arrival_rate_bags_s)
+        check_identifier("id", self.id)
+        check_identifier("label", self.label)
+        check_quantity("arrival_rate_bags_s", self.arrival_rate_bags_s)
 
 
 @dataclass(frozen=True)
@@ -70,7 +70,7 @@ class MergeConfig:
     position: Point
 
     def __post_init__(self) -> None:
-        _identifier("id", self.id)
+        check_identifier("id", self.id)
 
 
 @dataclass(frozen=True)
@@ -81,7 +81,7 @@ class SorterConfig:
     position: Point
 
     def __post_init__(self) -> None:
-        _identifier("id", self.id)
+        check_identifier("id", self.id)
 
 
 @dataclass(frozen=True)
@@ -93,8 +93,8 @@ class OutputConfig:
     position: Point
 
     def __post_init__(self) -> None:
-        _identifier("id", self.id)
-        _identifier("label", self.label)
+        check_identifier("id", self.id)
+        check_identifier("label", self.label)
 
 
 @dataclass(frozen=True)
@@ -113,11 +113,11 @@ class BeltConfig:
     speed_m_s: float = 1.0
 
     def __post_init__(self) -> None:
-        _identifier("id", self.id)
-        _identifier("source_id", self.source_id)
-        _identifier("target_id", self.target_id)
-        _quantity("speed_m_s", self.speed_m_s, positive=True)
-        _quantity("length_m", self.length_m, positive=True)
+        check_identifier("id", self.id)
+        check_identifier("source_id", self.source_id)
+        check_identifier("target_id", self.target_id)
+        check_quantity("speed_m_s", self.speed_m_s, positive=True)
+        check_quantity("length_m", self.length_m, positive=True)
 
     @property
     def length_m(self) -> float:
@@ -141,8 +141,8 @@ class LayoutConfig:
     min_gap_m: float = 0.2
 
     def __post_init__(self) -> None:
-        _quantity("baggage_length_m", self.baggage_length_m, positive=True)
-        _quantity("min_gap_m", self.min_gap_m)
+        check_quantity("baggage_length_m", self.baggage_length_m, positive=True)
+        check_quantity("min_gap_m", self.min_gap_m)
         _check_layout(self)
 
 
@@ -301,4 +301,24 @@ def default_layout() -> LayoutConfig:
             BeltConfig("branch-3-1", "sorter", "branch-3-2", Point(20, 4), Point(20, 8)),
             BeltConfig("branch-3-2", "branch-3-1", "output-3", Point(20, 8), Point(28, 8)),
         ),
+    )
+
+
+def minimal_layout(*, length_m: float = 10.0, speed_m_s: float = 1.0,
+                   arrival_rate_bags_s: float = 0.5, baggage_length_m: float = 0.6,
+                   min_gap_m: float = 0.2) -> LayoutConfig:
+    """The smallest plant: input-a → belt-1 → output-1, on one straight belt.
+
+    Every bag is destined for output-1. The parameters make it easy to test
+    movement, spacing and exits on a single belt.
+    """
+    end = Point(length_m, 0)
+    return LayoutConfig(
+        inputs=(InputConfig("input-a", "A", Point(0, 0), arrival_rate_bags_s),),
+        merges=(),
+        sorters=(),
+        outputs=(OutputConfig("output-1", "BF 101", end),),
+        belts=(BeltConfig("belt-1", "input-a", "output-1", Point(0, 0), end, speed_m_s),),
+        baggage_length_m=baggage_length_m,
+        min_gap_m=min_gap_m,
     )

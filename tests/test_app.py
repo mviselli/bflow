@@ -10,7 +10,7 @@ import time
 from fastapi.testclient import TestClient
 
 from bflow.core.engine import Engine
-from bflow.core.models import SimulationConfig
+from bflow.core.layout import minimal_layout
 from bflow.server.app import SNAPSHOT_INTERVAL_S, create_app
 from bflow.server.protocol import layout_message, snapshot_message
 from bflow.server.runner import Runner
@@ -185,7 +185,7 @@ def test_snapshots_follow_start_pause_and_resume():
 
 def test_each_event_is_sent_once_per_connection():
     # Arrivals faster than the belt can admit start an entrance queue event.
-    app, _, clock = make_app(Engine(SimulationConfig(arrival_rate_bags_s=5.0)))
+    app, _, clock = make_app(Engine(minimal_layout(arrival_rate_bags_s=5.0)))
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
             ws.send_text('{"type": "start"}')

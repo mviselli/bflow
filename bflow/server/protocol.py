@@ -112,16 +112,20 @@ class ErrorMessage(Message):
 
 
 def layout_message(engine: Engine) -> LayoutMessage:
-    config = engine.config
+    """Describes a one-belt route: the page cannot draw a larger plant yet."""
+    layout = engine.layout
+    if len(layout.belts) != 1:
+        raise ValueError("The page can only draw a one-belt route for now")
     return LayoutMessage(
         tick=engine.tick,
         time_s=engine.time_s,
         step_ms=STEP_MS,
-        input_id=config.input_id,
-        output_id=config.output_id,
-        conveyors=[ConveyorInfo.model_validate(config.conveyor, from_attributes=True)],
-        baggage_length_m=config.baggage_length_m,
-        min_gap_m=config.min_gap_m,
+        input_id=layout.inputs[0].id,
+        output_id=layout.outputs[0].id,
+        conveyors=[ConveyorInfo.model_validate(belt, from_attributes=True)
+                   for belt in layout.belts],
+        baggage_length_m=layout.baggage_length_m,
+        min_gap_m=layout.min_gap_m,
     )
 
 
@@ -132,7 +136,7 @@ def snapshot_message(engine: Engine, *, running: bool, after_event_id: int = 0) 
         time_s=engine.time_s,
         running=running,
         baggage=[BaggageState.model_validate(baggage, from_attributes=True)
-                 for baggage in engine.conveyor.baggage],
+                 for conveyor in engine.conveyors.values() for baggage in conveyor.baggage],
         stats=StatsState.model_validate(engine.stats(), from_attributes=True),
         events=[EventState.model_validate(event, from_attributes=True)
                 for event in engine.events.since(after_event_id)],

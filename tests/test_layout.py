@@ -6,7 +6,7 @@ import pytest
 
 from bflow.core.layout import (
     BeltConfig, InputConfig, LayoutConfig, MergeConfig, OutputConfig, Point,
-    SorterConfig, default_layout,
+    SorterConfig, default_layout, minimal_layout,
 )
 
 
@@ -225,3 +225,27 @@ def test_a_single_belt_from_input_to_output_is_a_valid_plant():
 
 def test_a_bag_as_long_as_the_shortest_belt_fits():
     assert replace(default_layout(), baggage_length_m=4).baggage_length_m == 4
+
+
+def test_minimal_layout_is_one_belt_from_input_to_output():
+    layout = minimal_layout()
+    (belt,) = layout.belts
+    assert (belt.source_id, belt.id, belt.target_id) == ("input-a", "belt-1", "output-1")
+    assert (belt.length_m, belt.speed_m_s) == (10, 1)
+    assert layout.inputs[0].arrival_rate_bags_s == 0.5
+    assert (layout.baggage_length_m, layout.min_gap_m) == (0.6, 0.2)
+
+
+@pytest.mark.parametrize("fields", [
+    {"length_m": 0}, {"length_m": float("inf")}, {"speed_m_s": 0}, {"speed_m_s": -1},
+    {"arrival_rate_bags_s": -1}, {"arrival_rate_bags_s": float("inf")},
+    {"min_gap_m": -0.1}, {"baggage_length_m": 0}, {"baggage_length_m": 11},
+])
+def test_invalid_minimal_layout(fields):
+    with pytest.raises(ValueError):
+        minimal_layout(**fields)
+
+
+def test_minimal_layout_allows_no_arrivals_no_gap_and_exact_fit():
+    layout = minimal_layout(arrival_rate_bags_s=0, min_gap_m=0, baggage_length_m=10)
+    assert layout.baggage_length_m == layout.belts[0].length_m

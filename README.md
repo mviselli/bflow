@@ -36,7 +36,12 @@ a common line, a sorter and three output branches, with belt connections,
 speeds and map coordinates in metres from which belt lengths are derived. A
 plant is checked when it is created: connections must match on the map, every
 output must be reachable from every input by exactly one route, and cycles or
-unconnected elements are rejected. The simulation does not run this plant yet.
+unconnected elements are rejected. The engine can already run this plant
+partially: each check-in desk generates bags at its own rate, each destined for
+one of the three outputs at random, with its own waiting queue, and bags pass
+from one belt to the next around corners. The merge and the sorter are not
+implemented yet, so bags stop where the lines join; the command line and the
+page still use the single-belt route.
 
 ## Requirements
 

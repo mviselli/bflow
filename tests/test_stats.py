@@ -5,7 +5,7 @@ import dataclasses
 import pytest
 
 from bflow.core.engine import Engine
-from bflow.core.models import ConveyorConfig, SimulationConfig
+from bflow.core.layout import minimal_layout
 
 
 def test_initial_snapshot_is_empty_and_conserved():
@@ -17,14 +17,14 @@ def test_initial_snapshot_is_empty_and_conserved():
 
 
 def test_snapshot_matches_engine_and_does_not_follow_later_steps():
-    engine = Engine(SimulationConfig(conveyor=ConveyorConfig(length_m=2), arrival_rate_bags_s=10))
+    engine = Engine(minimal_layout(length_m=2, arrival_rate_bags_s=10))
     for _ in range(1000):
         engine.step()
     stats = engine.stats()
     assert stats.tick == engine.tick == 1000
     assert stats.time_s == engine.time_s == 50
     assert stats.generated == engine.generated_count
-    assert stats.waiting == len(engine.waiting) > 0
+    assert stats.waiting == engine.waiting_count > 0
     assert stats.admitted == engine.admitted_count
     assert stats.correctly_delivered == engine.correctly_delivered_count > 0
     assert stats.misdelivered == engine.misdelivered_count == 0
@@ -45,17 +45,17 @@ def test_conservation_check_detects_lost_or_duplicated_baggage():
 
 
 def test_every_snapshot_of_a_long_run_is_conserved():
-    engine = Engine(SimulationConfig(conveyor=ConveyorConfig(length_m=3), arrival_rate_bags_s=2))
+    engine = Engine(minimal_layout(length_m=3, arrival_rate_bags_s=2))
     for _ in range(12000):
         engine.step()
         assert engine.stats().is_conserved
 
 
 def test_same_seed_and_steps_reproduce_stats_and_events():
-    config = SimulationConfig(conveyor=ConveyorConfig(length_m=2), arrival_rate_bags_s=3)
+    layout = minimal_layout(length_m=2, arrival_rate_bags_s=3)
     runs = []
     for _ in range(2):
-        engine = Engine(config, seed=11)
+        engine = Engine(layout, seed=11)
         snapshots = []
         for _ in range(12000):
             engine.step()
