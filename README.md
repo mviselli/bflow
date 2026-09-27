@@ -31,6 +31,10 @@ and the belt surface move smoothly: the page draws the simulation a fraction
 of a second behind the newest snapshot and places each bag between the two
 positions the engine reported, so nothing is extrapolated. When paused, the
 bags and the belt stop at the paused instant.
+The full plant is also described in Python: three check-in desks, a merge,
+a common line, a sorter and three output branches, with belt connections,
+speeds and map coordinates in metres from which belt lengths are derived. The
+simulation does not run this plant yet.
 
 ## Requirements
 
