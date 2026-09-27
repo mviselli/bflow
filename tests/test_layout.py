@@ -1,6 +1,6 @@
 """Predefined plant: elements, connections, map coordinates and lengths."""
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -134,4 +134,94 @@ def test_invalid_elements(make):
 
 def test_a_zero_rate_and_no_gap_are_allowed():
     assert InputConfig("input", "A", Point(0, 0), 0).arrival_rate_bags_s == 0
-    assert LayoutConfig((), (), (), (), (), min_gap_m=0).min_gap_m == 0
+    assert replace(default_layout(), min_gap_m=0).min_gap_m == 0
+
+
+# Validation of the plant as a whole. Each case changes the default layout
+# just enough to break one rule.
+
+
+def _change_belt(layout, belt_id, **changes):
+    belts = tuple(replace(belt, **changes) if belt.id == belt_id else belt
+                  for belt in layout.belts)
+    return replace(layout, belts=belts)
+
+
+def _add(layout, **elements):
+    return replace(layout, **{name: getattr(layout, name) + tuple(added)
+                              for name, added in elements.items()})
+
+
+def _invalid_layouts():
+    layout = default_layout()
+    return [
+        ("at least one input", lambda: replace(layout, inputs=())),
+        ("at least one input and one output", lambda: replace(layout, outputs=())),
+        ("Duplicate identifiers: collector",
+         lambda: _add(layout, outputs=[OutputConfig("collector", "X", Point(30, 4))])),
+        ("must come from an input, merge, sorter or belt, not 'input-x'",
+         lambda: _change_belt(layout, "feeder-b", source_id="input-x")),
+        ("must come from .* not 'output-1'",
+         lambda: _change_belt(layout, "feeder-b", source_id="output-1")),
+        ("must go to a merge, sorter, output or belt, not 'input-b'",
+         lambda: _change_belt(layout, "feeder-b", target_id="input-b")),
+        ("cannot connect to itself",
+         lambda: _change_belt(layout, "collector", target_id="collector")),
+        ("feeder-a-2 comes from feeder-a-1, which does not go to feeder-a-2",
+         lambda: _change_belt(layout, "feeder-a-1", target_id="merge")),
+        ("feeder-a-1 goes to feeder-a-2, which does not come from feeder-a-1",
+         lambda: _change_belt(layout, "feeder-a-2", source_id="merge")),
+        ("Input input-d must feed exactly one belt, not 0",
+         lambda: _add(layout, inputs=[InputConfig("input-d", "D", Point(0, 12), 0.25)])),
+        ("Merge merge-2 must join two or more belts into one, not 0 into 0",
+         lambda: _add(layout, merges=[MergeConfig("merge-2", Point(12, 12))])),
+        ("Sorter sorter-2 must split one belt into two or more, not 0 into 0",
+         lambda: _add(layout, sorters=[SorterConfig("sorter-2", Point(12, 12))])),
+        ("Output output-4 must receive exactly one belt, not 0",
+         lambda: _add(layout, outputs=[OutputConfig("output-4", "BF 400", Point(28, 12))])),
+        ("Belt collector must start where merge is and end where sorter is",
+         lambda: replace(layout, sorters=(SorterConfig("sorter", Point(21, 4)),))),
+        ("Belt feeder-b must start where input-b is",
+         lambda: _change_belt(layout, "feeder-b", start=Point(1, 4))),
+        ("A bag does not fit on belt feeder-a-2",
+         lambda: replace(layout, baggage_length_m=5)),
+        ("cycle; on it or after it: .*collector.*merge.*sorter",
+         lambda: _add(layout, belts=[BeltConfig("return", "sorter", "merge",
+                                                Point(20, 4), Point(8, 4))])),
+        ("Output output-4 cannot be reached from input input-a",
+         lambda: _add(layout,
+                      inputs=[InputConfig("input-d", "D", Point(0, 12), 0.25)],
+                      outputs=[OutputConfig("output-4", "BF 400", Point(28, 12))],
+                      belts=[BeltConfig("direct", "input-d", "output-4",
+                                        Point(0, 12), Point(28, 12))])),
+        ("There are 2 routes from input input-a to output output-2",
+         lambda: replace(
+             layout,
+             merges=layout.merges + (MergeConfig("merge-2", Point(24, 4)),),
+             belts=tuple(belt for belt in layout.belts if belt.id != "branch-2") + (
+                 BeltConfig("branch-2", "sorter", "merge-2", Point(20, 4), Point(24, 4)),
+                 BeltConfig("branch-2-bis", "sorter", "merge-2", Point(20, 4), Point(24, 4)),
+                 BeltConfig("branch-2-out", "merge-2", "output-2", Point(24, 4), Point(28, 4)),
+             ))),
+    ]
+
+
+@pytest.mark.parametrize("message, make", _invalid_layouts(),
+                         ids=[message for message, _ in _invalid_layouts()])
+def test_invalid_layout(message, make):
+    with pytest.raises(ValueError, match=message):
+        make()
+
+
+def test_a_single_belt_from_input_to_output_is_a_valid_plant():
+    layout = LayoutConfig(
+        inputs=(InputConfig("input-a", "A", Point(0, 0), 0.5),),
+        merges=(), sorters=(),
+        outputs=(OutputConfig("output-1", "BF 101", Point(10, 0)),),
+        belts=(BeltConfig("belt-1", "input-a", "output-1", Point(0, 0), Point(10, 0)),),
+    )
+    assert layout.belts[0].length_m == 10
+
+
+def test_a_bag_as_long_as_the_shortest_belt_fits():
+    assert replace(default_layout(), baggage_length_m=4).baggage_length_m == 4

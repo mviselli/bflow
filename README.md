@@ -33,8 +33,10 @@ positions the engine reported, so nothing is extrapolated. When paused, the
 bags and the belt stop at the paused instant.
 The full plant is also described in Python: three check-in desks, a merge,
 a common line, a sorter and three output branches, with belt connections,
-speeds and map coordinates in metres from which belt lengths are derived. The
-simulation does not run this plant yet.
+speeds and map coordinates in metres from which belt lengths are derived. A
+plant is checked when it is created: connections must match on the map, every
+output must be reachable from every input by exactly one route, and cycles or
+unconnected elements are rejected. The simulation does not run this plant yet.
 
 ## Requirements
 

@@ -19,11 +19,12 @@ input-b ─ feeder-b ─ merge ─ collector ─ sorter ─ branch-2 ─ output-
 input-c ─ feeder-c-1 ─┘                    └─ branch-3-2 ─ output-3
 ```
 
-This module only describes the plant; each element checks its own values.
-Checks across elements (unique identifiers, connections, reachability,
-cycles) are separate from the data.
+Each element checks its own values; LayoutConfig then checks that the
+elements together form a plant the engine can run (see _check_layout), so an
+invalid layout cannot be built.
 """
 
+from collections import Counter, deque
 from dataclasses import dataclass
 from math import hypot, isfinite
 
@@ -142,6 +143,128 @@ class LayoutConfig:
     def __post_init__(self) -> None:
         _quantity("baggage_length_m", self.baggage_length_m, positive=True)
         _quantity("min_gap_m", self.min_gap_m)
+        _check_layout(self)
+
+
+def _check_layout(layout: LayoutConfig) -> None:
+    """Raises ValueError at the first rule the plant breaks.
+
+    1. At least one input and one output; identifiers unique among all elements.
+    2. A belt comes from an input, merge, sorter or belt and goes to a merge,
+       sorter, output or belt, never to itself.
+    3. When a belt feeds another belt, both agree: the target's source is it.
+    4. An input feeds one belt; a merge joins two or more belts into one; a
+       sorter splits one belt into two or more; an output receives one belt.
+    5. Connected ends meet on the map, and a bag fits on every belt.
+    6. No cycles: a bag can never come back to where it has been.
+    7. Exactly one route from every input to every output: every output is
+       reachable, and there are no alternative routes.
+
+    Rules 4 and 6 leave no orphan elements: going back through the sources
+    always ends at an input, going forward through the targets at an output.
+    """
+    nodes = layout.inputs + layout.merges + layout.sorters + layout.outputs
+    if not layout.inputs or not layout.outputs:
+        raise ValueError("The layout needs at least one input and one output")
+    ids = Counter(element.id for element in nodes + layout.belts)
+    duplicates = sorted(id for id, count in ids.items() if count > 1)
+    if duplicates:
+        raise ValueError(f"Duplicate identifiers: {', '.join(duplicates)}")
+
+    positions = {node.id: node.position for node in nodes}
+    belts = {belt.id: belt for belt in layout.belts}
+    input_ids = {node.id for node in layout.inputs}
+    output_ids = {node.id for node in layout.outputs}
+    junction_ids = {node.id for node in layout.merges + layout.sorters}
+
+    for belt in layout.belts:
+        if belt.id in (belt.source_id, belt.target_id):
+            raise ValueError(f"Belt {belt.id} cannot connect to itself")
+        if belt.source_id not in input_ids | junction_ids | belts.keys():
+            raise ValueError(f"Belt {belt.id} must come from an input, merge, sorter "
+                             f"or belt, not {belt.source_id!r}")
+        if belt.target_id not in output_ids | junction_ids | belts.keys():
+            raise ValueError(f"Belt {belt.id} must go to a merge, sorter, output "
+                             f"or belt, not {belt.target_id!r}")
+        if belt.source_id in belts and belts[belt.source_id].target_id != belt.id:
+            raise ValueError(f"Belt {belt.id} comes from {belt.source_id}, "
+                             f"which does not go to {belt.id}")
+        if belt.target_id in belts and belts[belt.target_id].source_id != belt.id:
+            raise ValueError(f"Belt {belt.id} goes to {belt.target_id}, "
+                             f"which does not come from {belt.id}")
+
+    incoming = Counter(belt.target_id for belt in layout.belts)
+    outgoing = Counter(belt.source_id for belt in layout.belts)
+    for node in layout.inputs:
+        if outgoing[node.id] != 1:
+            raise ValueError(f"Input {node.id} must feed exactly one belt, not {outgoing[node.id]}")
+    for node in layout.merges:
+        if incoming[node.id] < 2 or outgoing[node.id] != 1:
+            raise ValueError(f"Merge {node.id} must join two or more belts into one, "
+                             f"not {incoming[node.id]} into {outgoing[node.id]}")
+    for node in layout.sorters:
+        if incoming[node.id] != 1 or outgoing[node.id] < 2:
+            raise ValueError(f"Sorter {node.id} must split one belt into two or more, "
+                             f"not {incoming[node.id]} into {outgoing[node.id]}")
+    for node in layout.outputs:
+        if incoming[node.id] != 1:
+            raise ValueError(f"Output {node.id} must receive exactly one belt, not {incoming[node.id]}")
+
+    for belt in layout.belts:
+        source = belts[belt.source_id].end if belt.source_id in belts else positions[belt.source_id]
+        target = belts[belt.target_id].start if belt.target_id in belts else positions[belt.target_id]
+        if belt.start != source or belt.end != target:
+            raise ValueError(f"Belt {belt.id} must start where {belt.source_id} is "
+                             f"and end where {belt.target_id} is on the map")
+        if layout.baggage_length_m > belt.length_m:
+            raise ValueError(f"A bag does not fit on belt {belt.id}")
+
+    # The graph of every element: node → belt → belt or node.
+    successors: dict[str, list[str]] = {id: [] for id in ids}
+    for belt in layout.belts:
+        successors[belt.id].append(belt.target_id)
+        if belt.source_id not in belts:
+            successors[belt.source_id].append(belt.id)
+    order = _topological_order(successors)
+
+    # Number of routes from each element to each output, computed from the
+    # outputs backwards: an element has the routes of its successors combined.
+    routes: dict[str, Counter[str]] = {}
+    for id in reversed(order):
+        routes[id] = Counter({id: 1}) if id in output_ids else Counter()
+        for successor in successors[id]:
+            routes[id] += routes[successor]
+    for node in layout.inputs:
+        for output_id in sorted(output_ids):
+            count = routes[node.id][output_id]
+            if count == 0:
+                raise ValueError(f"Output {output_id} cannot be reached from input {node.id}")
+            if count > 1:
+                raise ValueError(f"There are {count} routes from input {node.id} to output "
+                                 f"{output_id}; alternative routes are not supported")
+
+
+def _topological_order(successors: dict[str, list[str]]) -> list[str]:
+    """Orders the elements so that each comes before its successors (Kahn's algorithm).
+
+    Elements with no predecessors are removed first, then those whose
+    predecessors have all been removed, and so on. Elements that are never
+    removed lie on a cycle, or after one.
+    """
+    predecessor_count = Counter(id for targets in successors.values() for id in targets)
+    ready = deque(id for id in successors if predecessor_count[id] == 0)
+    order = []
+    while ready:
+        id = ready.popleft()
+        order.append(id)
+        for successor in successors[id]:
+            predecessor_count[successor] -= 1
+            if predecessor_count[successor] == 0:
+                ready.append(successor)
+    if len(order) < len(successors):
+        stuck = sorted(set(successors) - set(order))
+        raise ValueError(f"The layout has a cycle; on it or after it: {', '.join(stuck)}")
+    return order
 
 
 def default_layout() -> LayoutConfig:
