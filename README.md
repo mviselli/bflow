@@ -49,7 +49,8 @@ builds up behind it, and after the restart the flow resumes. The engine reports,
 besides the overall counters, how full each belt is (bags compared with the
 most it can hold at the minimum spacing), how many bags are waiting at each
 check-in desk, and the throughput: correct deliveries in the last 60 simulated
-seconds. The command line and the page still use the single-belt route.
+seconds, and the arrivals at each output. The command line runs the whole
+plant; the page still shows the single-belt route.
 
 ## Requirements
 
@@ -126,12 +127,16 @@ to the browser.
 uv run python -m bflow.cli --duration 600 --seed 42
 ```
 
-Runs the default route without the browser, as fast as possible, and prints
+Runs the whole plant without the browser, as fast as possible, and prints
 generated, waiting, admitted, correctly delivered, misdelivered, and in-transit
-baggage, the mean travel time (`—` before the first exit), errors, warnings, and
-the conservation check `admitted = delivered + misdelivered + in transit`.
-`--duration` is in simulated seconds and must be a multiple of 50 ms (default
-600); `--seed` defaults to 42. The command exits with status 1 if conservation
+baggage, the mean travel time (`—` before the first exit), the throughput
+(correct deliveries in the last 60 simulated seconds), errors and warnings;
+then the bags waiting at each check-in desk, the correct and wrong arrivals at
+each output, the bags on each belt against its capacity, and the conservation
+check `admitted = delivered + misdelivered + in transit`. `--duration` is in
+simulated seconds and must be a multiple of 50 ms (default 600); `--seed`
+defaults to 42; `--layout minimal` runs the single-belt route shown by the page
+instead of the full plant. The command exits with status 1 if conservation
 fails.
 
 ## Simulation server

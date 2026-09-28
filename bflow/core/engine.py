@@ -6,7 +6,7 @@ from random import Random
 from bflow.core.events import EventLog, Severity
 from bflow.core.layout import LayoutConfig, minimal_layout
 from bflow.core.models import Baggage, Conveyor
-from bflow.core.stats import BeltStats, InputStats, Stats
+from bflow.core.stats import BeltStats, InputStats, OutputStats, Stats
 
 
 STEP_MS = 50
@@ -79,6 +79,9 @@ class Engine:
         self.admitted_count = 0
         self.correctly_delivered_count = 0
         self.misdelivered_count = 0
+        # Arrivals at each output, split into correct and wrong.
+        self.correctly_delivered_by_output = {node.id: 0 for node in self.layout.outputs}
+        self.misdelivered_by_output = {node.id: 0 for node in self.layout.outputs}
         self._total_travel_time_s = 0.0
         # Ticks of the correct deliveries still inside the throughput window,
         # oldest first: bounded by what the plant can deliver in 60 s.
@@ -148,6 +151,9 @@ class Engine:
                         for belt_id, conveyor in self.conveyors.items()),
             inputs=tuple(InputStats(input_id, len(queue))
                          for input_id, queue in self.waiting.items()),
+            outputs=tuple(OutputStats(output_id, self.correctly_delivered_by_output[output_id],
+                                      self.misdelivered_by_output[output_id])
+                          for output_id in self._output_ids),
         )
 
     def stop_belt(self, belt_id: str) -> None:
@@ -323,9 +329,11 @@ class Engine:
         baggage.exited_at_s = self.time_s
         if baggage.destination_id == output_id:
             self.correctly_delivered_count += 1
+            self.correctly_delivered_by_output[output_id] += 1
             self._recent_delivery_ticks.append(self.tick)
         else:
             self.misdelivered_count += 1
+            self.misdelivered_by_output[output_id] += 1
         self._total_travel_time_s += self.time_s - baggage.entered_at_s
 
     def _forget_old_deliveries(self) -> None:

@@ -30,8 +30,17 @@ class InputStats:
 
 
 @dataclass(frozen=True)
+class OutputStats:
+    """Bags that arrived at one output: for it, or for another output."""
+
+    output_id: str
+    correctly_delivered: int
+    misdelivered: int
+
+
+@dataclass(frozen=True)
 class Stats:
-    """The counters at one tick. ``belts`` and ``inputs`` are in layout order.
+    """The counters at one tick. ``belts``, ``inputs`` and ``outputs`` are in layout order.
 
     ``throughput`` counts the correct deliveries in the last 60 simulated
     seconds (fewer seconds at the start of a run).
@@ -51,6 +60,7 @@ class Stats:
     throughput: int
     belts: tuple[BeltStats, ...]
     inputs: tuple[InputStats, ...]
+    outputs: tuple[OutputStats, ...]
 
     @property
     def exited(self) -> int:
@@ -60,11 +70,14 @@ class Stats:
     def is_conserved(self) -> bool:
         """No bag lost or duplicated, neither at the entrance nor in the plant.
 
-        The per-input and per-belt counts must also add up to the totals.
+        The per-input, per-belt and per-output counts must also add up to
+        the totals.
         """
         return (
             self.generated == self.admitted + self.waiting
             and self.admitted == self.correctly_delivered + self.misdelivered + self.in_transit
             and self.waiting == sum(node.waiting for node in self.inputs)
             and self.in_transit == sum(belt.bags for belt in self.belts)
+            and self.correctly_delivered == sum(node.correctly_delivered for node in self.outputs)
+            and self.misdelivered == sum(node.misdelivered for node in self.outputs)
         )
