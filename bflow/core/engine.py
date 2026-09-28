@@ -6,11 +6,13 @@ from random import Random
 from bflow.core.events import EventLog, Severity
 from bflow.core.layout import LayoutConfig, minimal_layout
 from bflow.core.models import Baggage, Conveyor
-from bflow.core.stats import Stats
+from bflow.core.stats import BeltStats, InputStats, Stats
 
 
 STEP_MS = 50
 STEP_SECONDS = STEP_MS / 1000
+# Throughput counts the correct deliveries of the last 60 simulated seconds.
+THROUGHPUT_WINDOW_TICKS = 60 * 1000 // STEP_MS
 
 
 class Engine:
@@ -37,6 +39,11 @@ class Engine:
         self._tick = 0
         # One state per belt, in layout order.
         self.conveyors = {belt.id: Conveyor(belt) for belt in self.layout.belts}
+        # Most bags each belt can hold: n bags need n lengths and n - 1 gaps.
+        # The tiny margin keeps an exact fit from being lost to rounding.
+        bag, gap = self.layout.baggage_length_m, self.layout.min_gap_m
+        self.belt_capacities = {belt.id: int((belt.length_m + gap) / (bag + gap) + 1e-9)
+                                for belt in self.layout.belts}
         # Belt fed by each input: the layout guarantees exactly one.
         self.input_conveyors = {belt.source_id: self.conveyors[belt.id]
                                 for belt in self.layout.belts
@@ -73,6 +80,9 @@ class Engine:
         self.correctly_delivered_count = 0
         self.misdelivered_count = 0
         self._total_travel_time_s = 0.0
+        # Ticks of the correct deliveries still inside the throughput window,
+        # oldest first: bounded by what the plant can deliver in 60 s.
+        self._recent_delivery_ticks: deque[int] = deque()
         # Only the exits of the last tick: no unbounded history.
         self.exited_this_tick: tuple[Baggage, ...] = ()
         self.events = EventLog()
@@ -114,6 +124,11 @@ class Engine:
             return None
         return self._total_travel_time_s / self.exited_count
 
+    @property
+    def throughput(self) -> int:
+        """Correct deliveries in the last 60 simulated seconds, this tick included."""
+        return len(self._recent_delivery_ticks)
+
     def stats(self) -> Stats:
         """Snapshot of the counters at the current tick, for the CLI and GUI."""
         return Stats(
@@ -128,6 +143,11 @@ class Engine:
             mean_travel_time_s=self.mean_travel_time_s,
             errors=self.events.counts[Severity.ERROR],
             warnings=self.events.counts[Severity.WARNING],
+            throughput=self.throughput,
+            belts=tuple(BeltStats(belt_id, len(conveyor.baggage), self.belt_capacities[belt_id])
+                        for belt_id, conveyor in self.conveyors.items()),
+            inputs=tuple(InputStats(input_id, len(queue))
+                         for input_id, queue in self.waiting.items()),
         )
 
     def stop_belt(self, belt_id: str) -> None:
@@ -164,6 +184,7 @@ class Engine:
         self._move()
         leaving = self._resolve_merges(self._evaluate_transfers())
         self._apply_transfers(leaving)
+        self._forget_old_deliveries()
         self._generate()
         self._admit()
         self._update_entrance_queues()
@@ -302,9 +323,19 @@ class Engine:
         baggage.exited_at_s = self.time_s
         if baggage.destination_id == output_id:
             self.correctly_delivered_count += 1
+            self._recent_delivery_ticks.append(self.tick)
         else:
             self.misdelivered_count += 1
         self._total_travel_time_s += self.time_s - baggage.entered_at_s
+
+    def _forget_old_deliveries(self) -> None:
+        """Drops the deliveries older than the throughput window.
+
+        A delivery at tick t counts up to tick t + 1199: exactly 60 s.
+        """
+        oldest_kept = self.tick - THROUGHPUT_WINDOW_TICKS + 1
+        while self._recent_delivery_ticks and self._recent_delivery_ticks[0] < oldest_kept:
+            self._recent_delivery_ticks.popleft()
 
     def _generate(self) -> None:
         """Queues every due arrival at each input, without losing demand when it is full.

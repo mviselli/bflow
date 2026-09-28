@@ -45,8 +45,11 @@ spacing; a line with no bag ready is skipped. The sorter sends each bag onto
 the branch of its destination; when that branch has no room, the bag waits at
 the sorter and the bags behind it queue up. A single belt can be stopped and
 restarted while the rest of the plant keeps running: its bags stay put, a queue
-builds up behind it, and after the restart the flow resumes. The command line
-and the page still use the single-belt route.
+builds up behind it, and after the restart the flow resumes. The engine reports,
+besides the overall counters, how full each belt is (bags compared with the
+most it can hold at the minimum spacing), how many bags are waiting at each
+check-in desk, and the throughput: correct deliveries in the last 60 simulated
+seconds. The command line and the page still use the single-belt route.
 
 ## Requirements
 

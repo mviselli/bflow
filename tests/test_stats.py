@@ -63,3 +63,17 @@ def test_same_seed_and_steps_reproduce_stats_and_events():
         runs.append((snapshots, engine.events.since(0), engine.events.counts))
     assert runs[0] == runs[1]
     assert runs[0][1]
+
+
+def test_conservation_check_detects_per_input_or_per_belt_counts_that_do_not_add_up():
+    engine = Engine(minimal_layout(length_m=2, arrival_rate_bags_s=10))
+    for _ in range(100):
+        engine.step()
+    stats = engine.stats()
+    assert stats.is_conserved and stats.waiting > 0 and stats.in_transit > 0
+    (belt,) = stats.belts
+    (node,) = stats.inputs
+    assert not dataclasses.replace(
+        stats, belts=(dataclasses.replace(belt, bags=belt.bags + 1),)).is_conserved
+    assert not dataclasses.replace(
+        stats, inputs=(dataclasses.replace(node, waiting=node.waiting - 1),)).is_conserved
