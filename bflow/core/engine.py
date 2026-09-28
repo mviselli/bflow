@@ -130,6 +130,34 @@ class Engine:
             warnings=self.events.counts[Severity.WARNING],
         )
 
+    def stop_belt(self, belt_id: str) -> None:
+        """Stops one belt on the operator's command, from the next step.
+
+        Its bags stay where they are and the queue grows upstream; the rest
+        of the plant keeps running. Stopping a stopped belt does nothing.
+        """
+        self._set_stopped(belt_id, True)
+
+    def restart_belt(self, belt_id: str) -> None:
+        """Restarts a belt stopped by the operator, from the next step."""
+        self._set_stopped(belt_id, False)
+
+    def _set_stopped(self, belt_id: str, stopped: bool) -> None:
+        """Changes a belt's local stop, recording an event only if it changes."""
+        if belt_id not in self.conveyors:
+            raise ValueError(f"Unknown belt: {belt_id!r}")
+        conveyor = self.conveyors[belt_id]
+        if conveyor.stopped == stopped:
+            return
+        conveyor.stopped = stopped
+        if stopped:
+            kind, message = "belt_stopped", "Belt stopped by the operator"
+        else:
+            kind, message = "belt_restarted", "Belt restarted by the operator"
+        # A voluntary stop is information, not a fault.
+        self.events.record(self.tick, self.time_s, Severity.INFO, kind, message,
+                           element_id=belt_id)
+
     def step(self) -> None:
         """Completes one fixed step without reading real time or waiting."""
         self._tick += 1
@@ -141,7 +169,7 @@ class Engine:
         self._update_entrance_queues()
 
     def _move(self) -> None:
-        """Advances each belt from the exit towards the entrance.
+        """Advances each running belt from the exit towards the entrance.
 
         On each belt the front edge stops at the end of the belt or at the
         minimum gap from the rear edge of the bag ahead, using its updated
@@ -149,6 +177,8 @@ class Engine:
         bag has finished moving.
         """
         for conveyor in self.conveyors.values():
+            if conveyor.stopped:
+                continue
             distance = conveyor.config.speed_m_s * STEP_SECONDS
             front_limit = conveyor.config.length_m
             for baggage in reversed(conveyor.baggage):
@@ -200,10 +230,11 @@ class Engine:
         a sorter) accepts it only if its entrance has space; otherwise the bag
         waits at the end of its belt, and the bags behind it wait too. Several
         belts can be ready for the same merge: _resolve_merges chooses one.
+        A stopped belt hands over nothing, but can still receive a bag.
         """
         leaving = []
         for conveyor in self.conveyors.values():
-            if not conveyor.baggage:
+            if conveyor.stopped or not conveyor.baggage:
                 continue
             baggage = conveyor.baggage[-1]
             if baggage.position_m < conveyor.config.length_m - baggage.length_m:
@@ -302,7 +333,8 @@ class Engine:
 
         The belt list is ordered from entrance to exit: the first element is
         the closest to the new bag. One admission per tick is enough because
-        the new bag immediately occupies position zero.
+        the new bag immediately occupies position zero. A stopped belt admits
+        a bag too if its entrance is free, but then keeps it there.
         """
         for input_id, queue in self.waiting.items():
             conveyor = self.input_conveyors[input_id]

@@ -43,8 +43,10 @@ queue, and bags pass from one belt to the next around corners. At the merge the
 three lines take turns onto the common line, one bag at a time, keeping the
 spacing; a line with no bag ready is skipped. The sorter sends each bag onto
 the branch of its destination; when that branch has no room, the bag waits at
-the sorter and the bags behind it queue up. The command line and the page still
-use the single-belt route.
+the sorter and the bags behind it queue up. A single belt can be stopped and
+restarted while the rest of the plant keeps running: its bags stay put, a queue
+builds up behind it, and after the restart the flow resumes. The command line
+and the page still use the single-belt route.
 
 ## Requirements
 

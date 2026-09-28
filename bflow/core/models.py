@@ -70,7 +70,11 @@ class Conveyor:
 
     The engine maintains the order, membership and spacing of the list.
     The configuration stays separate from the state so it can be reset.
+    ``stopped`` is the operator's local stop, distinct from the global pause:
+    a stopped belt neither moves nor hands over bags, but still receives one
+    when its entrance has space.
     """
 
     config: BeltConfig
     baggage: list[Baggage] = field(default_factory=list)
+    stopped: bool = False
