@@ -47,7 +47,8 @@ class Engine:
                                        if belt.target_id == node.id]
                              for node in self.layout.merges}
         # The belt each belt hands its bags to: the following belt, or the
-        # belt leaving the merge it ends at. Outputs and sorters are not here.
+        # belt leaving the merge it ends at. Belts ending at an output or a
+        # sorter are not here (see _next_conveyor).
         self._next_conveyors = {}
         for belt in self.layout.belts:
             if belt.target_id in self.conveyors:
@@ -57,6 +58,13 @@ class Engine:
                     self._next_conveyors[belt_id] = self.conveyors[belt.id]
         # Belt whose bag each merge let through last; None before the first.
         self.last_merged: dict[str, str | None] = {node.id: None for node in self.layout.merges}
+        # For each sorter, the branch leading to each output after it: the
+        # layout allows one route per output, so the choice is predetermined.
+        self.sorter_routes = {node.id: {output_id: belt.id
+                                        for belt in self.layout.belts
+                                        if belt.source_id == node.id
+                                        for output_id in self._outputs_after(belt.id)}
+                              for node in self.layout.sorters}
         # Bags generated but not yet admitted, per input, oldest first.
         self.waiting: dict[str, deque[Baggage]] = {node.id: deque() for node in self.layout.inputs}
         self.generated_count = 0
@@ -152,6 +160,29 @@ class Engine:
                 )
                 front_limit = baggage.position_m - self.layout.min_gap_m
 
+    def _outputs_after(self, element_id: str) -> set[str]:
+        """The outputs a bag can reach from a belt or node, following the targets.
+
+        The layout has no cycles, so the recursion always ends at outputs.
+        """
+        if element_id in self._output_ids:
+            return {element_id}
+        if element_id in self.conveyors:
+            return self._outputs_after(self.conveyors[element_id].config.target_id)
+        # A merge or sorter: the outputs after every belt leaving it.
+        return set().union(*(self._outputs_after(belt.id) for belt in self.layout.belts
+                             if belt.source_id == element_id))
+
+    def _next_conveyor(self, conveyor: Conveyor, baggage: Baggage) -> Conveyor | None:
+        """The belt that receives the front bag of a belt; None when it ends at an output.
+
+        After a sorter it is the branch of the bag's destination.
+        """
+        target_id = conveyor.config.target_id
+        if target_id in self.sorter_routes:
+            return self.conveyors[self.sorter_routes[target_id][baggage.destination_id]]
+        return self._next_conveyors.get(conveyor.config.id)
+
     def _has_entry_space(self, conveyor: Conveyor, baggage: Baggage) -> bool:
         """True if the bag fits at position zero, keeping the gap to the nearest bag."""
         if not conveyor.baggage:
@@ -165,9 +196,10 @@ class Engine:
         limit uses the same subtraction as movement, avoiding inconsistent
         comparisons due to rounding; no epsilon brings the exit forward.
         An output always accepts the bag. The next belt (the following one,
-        or the one leaving a merge) accepts it only if its entrance has
-        space. Several belts can be ready for the same merge: _resolve_merges
-        chooses one. Belts that end at a sorter keep their bags for now.
+        the one leaving a merge, or the branch of the bag's destination after
+        a sorter) accepts it only if its entrance has space; otherwise the bag
+        waits at the end of its belt, and the bags behind it wait too. Several
+        belts can be ready for the same merge: _resolve_merges chooses one.
         """
         leaving = []
         for conveyor in self.conveyors.values():
@@ -176,11 +208,9 @@ class Engine:
             baggage = conveyor.baggage[-1]
             if baggage.position_m < conveyor.config.length_m - baggage.length_m:
                 continue
-            if conveyor.config.target_id in self._output_ids:
+            next_conveyor = self._next_conveyor(conveyor, baggage)
+            if next_conveyor is None or self._has_entry_space(next_conveyor, baggage):
                 leaving.append(conveyor)
-            elif conveyor.config.id in self._next_conveyors:
-                if self._has_entry_space(self._next_conveyors[conveyor.config.id], baggage):
-                    leaving.append(conveyor)
         return tuple(leaving)
 
     def _resolve_merges(self, ready: tuple[Conveyor, ...]) -> tuple[Conveyor, ...]:
@@ -223,8 +253,8 @@ class Engine:
             target_id = conveyor.config.target_id
             if target_id in self.merge_inputs:
                 self.last_merged[target_id] = conveyor.config.id
-            if conveyor.config.id in self._next_conveyors:
-                next_conveyor = self._next_conveyors[conveyor.config.id]
+            next_conveyor = self._next_conveyor(conveyor, baggage)
+            if next_conveyor is not None:
                 baggage.conveyor_id = next_conveyor.config.id
                 baggage.position_m = 0.0
                 next_conveyor.baggage.insert(0, baggage)
