@@ -39,9 +39,11 @@ output must be reachable from every input by exactly one route, and cycles or
 unconnected elements are rejected. The engine can already run this plant
 partially: each check-in desk generates bags at its own rate, each destined for
 one of the three outputs at random, with its own waiting queue, and bags pass
-from one belt to the next around corners. The merge and the sorter are not
-implemented yet, so bags stop where the lines join; the command line and the
-page still use the single-belt route.
+from one belt to the next around corners. At the merge the three lines take
+turns onto the common line, one bag at a time, keeping the spacing; a line with
+no bag ready is skipped. The sorter is not implemented yet, so bags stop at the
+end of the common line; the command line and the page still use the
+single-belt route.
 
 ## Requirements
 

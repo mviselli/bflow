@@ -42,6 +42,21 @@ class Engine:
                                 for belt in self.layout.belts
                                 if belt.source_id in {node.id for node in self.layout.inputs}}
         self._output_ids = [node.id for node in self.layout.outputs]
+        # Belts entering each merge, in layout order: the order of the turns.
+        self.merge_inputs = {node.id: [belt.id for belt in self.layout.belts
+                                       if belt.target_id == node.id]
+                             for node in self.layout.merges}
+        # The belt each belt hands its bags to: the following belt, or the
+        # belt leaving the merge it ends at. Outputs and sorters are not here.
+        self._next_conveyors = {}
+        for belt in self.layout.belts:
+            if belt.target_id in self.conveyors:
+                self._next_conveyors[belt.id] = self.conveyors[belt.target_id]
+            elif belt.source_id in self.merge_inputs:
+                for belt_id in self.merge_inputs[belt.source_id]:
+                    self._next_conveyors[belt_id] = self.conveyors[belt.id]
+        # Belt whose bag each merge let through last; None before the first.
+        self.last_merged: dict[str, str | None] = {node.id: None for node in self.layout.merges}
         # Bags generated but not yet admitted, per input, oldest first.
         self.waiting: dict[str, deque[Baggage]] = {node.id: deque() for node in self.layout.inputs}
         self.generated_count = 0
@@ -111,7 +126,7 @@ class Engine:
         """Completes one fixed step without reading real time or waiting."""
         self._tick += 1
         self._move()
-        leaving = self._evaluate_transfers()
+        leaving = self._resolve_merges(self._evaluate_transfers())
         self._apply_transfers(leaving)
         self._generate()
         self._admit()
@@ -144,15 +159,15 @@ class Engine:
         return conveyor.baggage[0].position_m >= baggage.length_m + self.layout.min_gap_m
 
     def _evaluate_transfers(self) -> tuple[Conveyor, ...]:
-        """Returns the belts whose front bag leaves this tick, without mutating state.
+        """Returns the belts whose front bag is ready to leave, without mutating state.
 
-        A bag leaves when its front edge is at the end of the belt. The limit
-        uses the same subtraction as movement, avoiding inconsistent
+        A bag is ready when its front edge is at the end of the belt. The
+        limit uses the same subtraction as movement, avoiding inconsistent
         comparisons due to rounding; no epsilon brings the exit forward.
-        An output always accepts the bag. A following belt accepts it only if
-        its entrance has space: a belt fed by another belt has no other
-        source, so there are no conflicts. Belts that end at a merge or a
-        sorter keep their bags for now.
+        An output always accepts the bag. The next belt (the following one,
+        or the one leaving a merge) accepts it only if its entrance has
+        space. Several belts can be ready for the same merge: _resolve_merges
+        chooses one. Belts that end at a sorter keep their bags for now.
         """
         leaving = []
         for conveyor in self.conveyors.values():
@@ -161,19 +176,44 @@ class Engine:
             baggage = conveyor.baggage[-1]
             if baggage.position_m < conveyor.config.length_m - baggage.length_m:
                 continue
-            target_id = conveyor.config.target_id
-            if target_id in self._output_ids:
+            if conveyor.config.target_id in self._output_ids:
                 leaving.append(conveyor)
-            elif target_id in self.conveyors:
-                if self._has_entry_space(self.conveyors[target_id], baggage):
+            elif conveyor.config.id in self._next_conveyors:
+                if self._has_entry_space(self._next_conveyors[conveyor.config.id], baggage):
                     leaving.append(conveyor)
         return tuple(leaving)
+
+    def _resolve_merges(self, ready: tuple[Conveyor, ...]) -> tuple[Conveyor, ...]:
+        """Lets at most one bag per tick through each merge, taking turns; no mutation.
+
+        Only one bag fits at the entrance of the belt leaving the merge, so
+        the others wait. The turn goes to the first ready belt after the one
+        let through last, in layout order and wrapping around: with bags
+        waiting on every belt they pass one each in turn, and a belt that is
+        the only one ready never waits for the others. Before the first bag
+        the turn starts from the first belt. Belts not ending at a merge are
+        kept as they are, in the same order.
+        """
+        ready_ids = {conveyor.config.id for conveyor in ready}
+        chosen = set()
+        for merge_id, belt_ids in self.merge_inputs.items():
+            last = self.last_merged[merge_id]
+            first = belt_ids.index(last) + 1 if last is not None else 0
+            for offset in range(len(belt_ids)):
+                belt_id = belt_ids[(first + offset) % len(belt_ids)]
+                if belt_id in ready_ids:
+                    chosen.add(belt_id)
+                    break
+        return tuple(conveyor for conveyor in ready
+                     if conveyor.config.target_id not in self.merge_inputs
+                     or conveyor.config.id in chosen)
 
     def _apply_transfers(self, leaving: tuple[Conveyor, ...]) -> None:
         """Moves the front bag of each selected belt, exactly once.
 
-        On a following belt the bag starts at position zero, like a newly
-        admitted bag; an output unloads it automatically. Movement is not
+        On the next belt the bag starts at position zero, like a newly
+        admitted bag; an output unloads it automatically. A merge remembers
+        which belt it let through, for the next turn. Movement is not
         repeated after the transfer: following bags use the freed space, and
         the transferred bag moves, from the next tick.
         """
@@ -181,10 +221,13 @@ class Engine:
         for conveyor in leaving:
             baggage = conveyor.baggage.pop()
             target_id = conveyor.config.target_id
-            if target_id in self.conveyors:
-                baggage.conveyor_id = target_id
+            if target_id in self.merge_inputs:
+                self.last_merged[target_id] = conveyor.config.id
+            if conveyor.config.id in self._next_conveyors:
+                next_conveyor = self._next_conveyors[conveyor.config.id]
+                baggage.conveyor_id = next_conveyor.config.id
                 baggage.position_m = 0.0
-                self.conveyors[target_id].baggage.insert(0, baggage)
+                next_conveyor.baggage.insert(0, baggage)
             else:
                 self._exit(baggage, target_id)
                 exited.append(baggage)
