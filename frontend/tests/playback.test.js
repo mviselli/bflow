@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  DISPLAY_DELAY_S, MAX_DRIFT_S, beltOffset, createPlayback, interpolateBaggage,
+  DISPLAY_DELAY_S, MAX_DRIFT_S, beltOffset, createPlayback, interpolateBaggage, isNextBelt,
 } from '../src/playback.js';
 
 const STEP_S = 0.05;
@@ -115,4 +115,72 @@ test('the belt surface offset follows speed × time and repeats every slat', () 
   assert.ok(Math.abs(beltOffset(1, 0.1, 0.125) - 0.1) < 1e-12);
   assert.ok(Math.abs(beltOffset(1, 0.2, 0.125) - 0.075) < 1e-12);
   assert.ok(Math.abs(beltOffset(0.5, 1000.05, 0.125) - 0.025) < 1e-9);
+});
+
+// A corner and a sorter, as in the plant: across → (corner) → down → sorter
+// → left or right. Lengths in metres.
+function belt(id, source_id, target_id, length_m) {
+  return { id, source_id, target_id, length_m };
+}
+const BELTS = new Map([
+  belt('across', 'input-a', 'down', 10),
+  belt('down', 'across', 'sorter', 4),
+  belt('left', 'sorter', 'output-1', 8),
+  belt('right', 'sorter', 'output-2', 8),
+].map((b) => [b.id, b]));
+
+function on(conveyor, id, position) {
+  return { id, destination_id: 'output-1', conveyor_id: conveyor, position_m: position, length_m: 0.6 };
+}
+
+test('consecutive belts are those after a belt or after the same node', () => {
+  const [across, down, left] = ['across', 'down', 'left'].map((id) => BELTS.get(id));
+  assert.ok(isNextBelt(across, down, BELTS));
+  assert.ok(isNextBelt(down, left, BELTS));
+  assert.ok(!isNextBelt(down, across, BELTS));
+  assert.ok(!isNextBelt(across, left, BELTS), 'two belts ahead is not the next one');
+  assert.ok(!isNextBelt(left, BELTS.get('right'), BELTS), 'two branches of a sorter');
+});
+
+test('a bag that changes belt slides across the joint at an even pace', () => {
+  // Centre 0.35 m before the corner, then 0.35 m after it: 0.7 m in all.
+  const previous = [on('across', 'B1', 9.35)];
+  const next = [on('down', 'B1', 0.05)];
+  const at = (fraction) => interpolateBaggage(previous, next, fraction, BELTS)[0];
+  assert.deepEqual([at(0).conveyor_id, at(0).position_m], ['across', 9.35]);
+  // A quarter of the way: 0.175 m further along the first belt.
+  assert.equal(at(0.25).conveyor_id, 'across');
+  assert.ok(Math.abs(at(0.25).position_m - 9.525) < 1e-9);
+  // Half way: its centre is on the corner, drawn on the new belt.
+  assert.equal(at(0.5).conveyor_id, 'down');
+  assert.ok(Math.abs(at(0.5).position_m - -0.3) < 1e-9);
+  assert.equal(at(1).conveyor_id, 'down');
+  assert.ok(Math.abs(at(1).position_m - 0.05) < 1e-9);
+  for (const fraction of [0, 0.25, 0.5, 0.75, 1]) assert.equal(at(fraction).alpha, 1);
+});
+
+test('a bag leaving a sorter slides onto its branch', () => {
+  // Waiting with its front edge at the sorter, then at the start of its branch.
+  const bags = interpolateBaggage([on('down', 'B1', 3.4)], [on('left', 'B1', 0)], 0.75, BELTS);
+  assert.equal(bags.length, 1);
+  assert.equal(bags[0].conveyor_id, 'left');
+  // 0.6 m in all, 0.45 m done: centre 0.15 m past the sorter, rear edge 0.15 m before it.
+  assert.ok(Math.abs(bags[0].position_m - -0.15) < 1e-9);
+});
+
+test('without the layout, or between belts that do not meet, the bag fades', () => {
+  const previous = [on('across', 'B1', 9.4)];
+  assert.equal(interpolateBaggage(previous, [on('down', 'B1', 0)], 0.25)[0].alpha, 0.25);
+  const skipped = interpolateBaggage(previous, [on('left', 'B1', 0)], 0.25, BELTS);
+  assert.deepEqual(skipped.map((b) => [b.conveyor_id, b.alpha]), [['left', 0.25]]);
+});
+
+test('the playback slides bags between snapshots on different belts', () => {
+  const playback = createPlayback();
+  playback.add({ tick: 10, time_s: 0.5, running: true, baggage: [on('across', 'B1', 9.4)] }, 0);
+  playback.add({ tick: 12, time_s: 0.6, running: true, baggage: [on('down', 'B1', 0)] }, 0.1);
+  const [middle] = playback.baggageAt(0.55, BELTS);
+  assert.equal(middle.conveyor_id, 'down');
+  assert.ok(Math.abs(middle.position_m - -0.3) < 1e-9);
+  assert.equal(middle.alpha, 1);
 });

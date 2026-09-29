@@ -15,7 +15,7 @@ p { color: #aebfce; }
 .eyebrow { color: #75d7c0; margin-bottom: 8px; }
 section { margin-top: 32px; padding: 24px; border: 1px solid #304354; border-radius: 12px; }
 #status { margin-top: 8px; }
-#map { height: clamp(240px, 45vh, 480px); overflow: hidden; border-radius: 6px; }
+#map { height: clamp(300px, 55vh, 560px); overflow: hidden; border-radius: 6px; }
 canvas { display: block; }
 
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }

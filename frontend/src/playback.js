@@ -95,10 +95,12 @@ export function createPlayback() {
       return displayTime;
     },
 
-    // Bags to draw at simulated time timeS, each with its interpolated
-    // position_m and an opacity: a bag that enters or leaves the belt between
-    // two snapshots fades in or out in place instead of popping.
-    baggageAt(timeS) {
+    // Bags to draw at simulated time timeS, each with its interpolated belt,
+    // position_m and an opacity: a bag that changes belt slides across the
+    // joint (see interpolateBaggage), one that enters or leaves the plant
+    // between two snapshots fades in or out in place instead of popping.
+    // `belts` maps belt ids to the layout's belts.
+    baggageAt(timeS, belts) {
       if (snapshots.length === 0) return [];
       let after = snapshots.findIndex((snapshot) => snapshot.time_s >= timeS);
       if (after === -1) after = snapshots.length - 1;
@@ -106,26 +108,58 @@ export function createPlayback() {
       const previous = snapshots[Math.max(after - 1, 0)];
       const span = next.time_s - previous.time_s;
       const fraction = span > 0 ? Math.min(Math.max((timeS - previous.time_s) / span, 0), 1) : 1;
-      return interpolateBaggage(previous.baggage, next.baggage, fraction);
+      return interpolateBaggage(previous.baggage, next.baggage, fraction, belts);
     },
   };
 }
 
-// Bags between two snapshots, fraction 0 → previous, 1 → next.
-export function interpolateBaggage(previousBags, nextBags, fraction) {
+// True when a bag can pass from belt `from` straight onto belt `to`: `to`
+// follows `from`, or `from` ends at the merge or sorter that `to` leaves.
+export function isNextBelt(from, to, belts) {
+  if (to.source_id === from.id) return true;
+  return to.source_id === from.target_id && !belts.has(from.target_id);
+}
+
+// A bag that passed from one belt to the next between two snapshots. The
+// engine moves it to the end of the old belt, then puts its rear edge at the
+// start of the new one (a jump of about one bag length, an accepted
+// approximation). On screen its centre slides at an even pace along the
+// belts, from its old centre to the point where they meet and on to its new
+// centre: the same two states, with no movement beyond them. The returned
+// position_m keeps the engine's meaning (rear edge along the belt it is
+// drawn on), even where it runs a little past the belt's ends.
+function acrossBelts(old, baggage, from, fraction) {
+  const half = baggage.length_m / 2;
+  const toJoint = Math.max(from.length_m - (old.position_m + half), 0);
+  const fromJoint = Math.max(baggage.position_m + half, 0);
+  const travelled = (toJoint + fromJoint) * fraction;
+  if (travelled < toJoint) {
+    return { ...baggage, conveyor_id: from.id, position_m: old.position_m + travelled, alpha: 1 };
+  }
+  return { ...baggage, position_m: travelled - toJoint - half, alpha: 1 };
+}
+
+// Bags between two snapshots, fraction 0 → previous, 1 → next. `belts`
+// (belt id → belt from the layout) lets a bag slide from one belt onto the
+// next; without it, or when the two belts are not consecutive, the bag fades.
+export function interpolateBaggage(previousBags, nextBags, fraction, belts = new Map()) {
   const before = new Map(previousBags.map((baggage) => [baggage.id, baggage]));
   const result = [];
   for (const baggage of nextBags) {
     const old = before.get(baggage.id);
     before.delete(baggage.id);
+    const from = old && belts.get(old.conveyor_id);
+    const to = belts.get(baggage.conveyor_id);
     if (old && old.conveyor_id === baggage.conveyor_id) {
       const position = old.position_m + (baggage.position_m - old.position_m) * fraction;
       result.push({ ...baggage, position_m: position, alpha: 1 });
+    } else if (from && to && isNextBelt(from, to, belts)) {
+      result.push(acrossBelts(old, baggage, from, fraction));
     } else {
       result.push({ ...baggage, alpha: fraction });  // admitted in between
     }
   }
-  // Bags that left the belt in between (delivered).
+  // Bags that left the plant in between (delivered).
   for (const baggage of before.values()) result.push({ ...baggage, alpha: 1 - fraction });
   return result.filter((baggage) => baggage.alpha > 0);
 }

@@ -18,7 +18,7 @@ async function initialize() {
   });
   map.appendChild(app.canvas);
   app.canvas.setAttribute('role', 'img');
-  app.canvas.setAttribute('aria-label', 'Baggage belt from the input to the output');
+  app.canvas.setAttribute('aria-label', 'Baggage plant from the check-in desks to the outputs');
   status.textContent = 'Connecting to the simulation server…';
 
   const renderer = createRenderer(app);

@@ -1,21 +1,24 @@
-// Draws the route with PixiJS from the server's layout and snapshots.
+// Draws the plant with PixiJS from the server's layout and snapshots.
 //
-// Layers, bottom to top: the floor (tiles, desk, chute, signs, shadows), the
-// belt surface, the belt frame (rails and drums) and the bags. The textures
-// come from assets.js and are rebuilt when the layout or the screen size
-// changes. Every position goes through geometry.js.
+// Layers, bottom to top: the floor (tiles, direction arrows, desks, chutes,
+// signs, shadows), the belt surfaces, the belt frames (rails, drums and the
+// transfer plates where belts meet) and the bags. The textures come from
+// assets.js and are rebuilt when the layout or the screen size changes.
+// Every position goes through geometry.js.
 //
 // The scene is redrawn on every screen frame. Snapshots go to playback.js,
 // which gives the simulated time to draw and the bags between the two
 // snapshots around it: the renderer never invents movement, and when the
-// simulation is paused the bags and the belt surface stop with it.
+// simulation is paused the bags and the belt surfaces stop with it.
 
 import { Container, Sprite, TilingSprite } from 'pixi.js';
 import {
-  BAG_PADDING_M, BELT, beltSurfaceCanvas, floorCanvas, frameCanvas, suitcaseCanvas, toTexture,
+  BELT, beltSurfaceCanvas, floorCanvas, frameCanvas, suitcaseCanvas, surfaceSpan, toTexture,
 } from './assets.js';
-import { BAGGAGE_WIDTH_M, baggageRect, beltGeometry } from './geometry.js';
-import { hashString, shortCode, suitcaseLook } from './looks.js';
+import {
+  BAGGAGE_WIDTH_M, baggagePlacement, beltAngle, beltEnds, plantGeometry, pointAlong,
+} from './geometry.js';
+import { destinationLooks, hashString, shortCode, suitcaseLook } from './looks.js';
 import { beltOffset, createPlayback } from './playback.js';
 
 // Real time in seconds, for the display clock.
@@ -25,18 +28,21 @@ function nowSeconds() {
 
 export function createRenderer(app) {
   const floor = new Sprite();
-  const surface = new TilingSprite();
+  const surfaceLayer = new Container();
   const frame = new Sprite();
   const bagLayer = new Container();
-  app.stage.addChild(floor, surface, frame, bagLayer);
+  app.stage.addChild(floor, surfaceLayer, frame, bagLayer);
 
   let layout = null;
+  let belts = new Map();          // belt id → belt from the layout
+  let destinations = new Map();   // output id → { code, colour }
   const playback = createPlayback();
   let geometry = null;
   let resolution = 1;
   let sceneTextures = [];
+  const surfaces = new Map();     // belt id → TilingSprite of its moving surface
   const bagSprites = new Map();   // bag id → sprite on screen
-  const bagTextures = new Map();  // look → texture shared by bags that look alike
+  const bagTextures = new Map();  // look and angle → texture shared by bags that look alike
 
   function sceneTexture(canvas) {
     const texture = toTexture(canvas);
@@ -56,38 +62,50 @@ export function createRenderer(app) {
     const old = sceneTextures;
     sceneTextures = [];
     clearBags();
+    for (const surface of surfaces.values()) surface.destroy();
+    surfaces.clear();
 
     resolution = app.renderer.resolution;
     const { width, height } = app.screen;
-    const lengthM = layout.conveyors[0].length_m;
-    geometry = beltGeometry(lengthM, width, height);
-    const common = { geometry, screenWidth: width, screenHeight: height, resolution, lengthM };
+    geometry = plantGeometry(layout, width, height);
+    const common = { geometry, layout, screenWidth: width, screenHeight: height, resolution };
+    const inputCodes = new Map(layout.inputs.map((input) => [input.id, shortCode(input.id)]));
 
-    floor.texture = sceneTexture(floorCanvas({
-      ...common, inputCode: shortCode(layout.input_id), outputCode: shortCode(layout.output_id),
-    }));
+    floor.texture = sceneTexture(floorCanvas({ ...common, inputCodes, destinations }));
     frame.texture = sceneTexture(frameCanvas(common));
     // Textures are drawn at device resolution; scaling by 1/resolution gives CSS pixels.
     floor.scale.set(1 / resolution);
     frame.scale.set(1 / resolution);
 
-    surface.texture = sceneTexture(beltSurfaceCanvas(geometry.pixelsPerMetre * resolution));
-    surface.tileScale.set(1 / resolution);
-    surface.position.set(geometry.startX, geometry.centreY - geometry.toPixels(BELT.surfaceM) / 2);
-    surface.width = geometry.toPixels(lengthM);
-    surface.height = geometry.toPixels(BELT.surfaceM);
+    // One moving surface per belt, all sharing the same slat texture.
+    const slat = sceneTexture(beltSurfaceCanvas(geometry.pixelsPerMetre * resolution));
+    const ends = beltEnds(layout);
+    for (const belt of layout.belts) {
+      const { from, to } = surfaceSpan(belt, ends.get(belt.id));
+      const surface = new TilingSprite({ texture: slat });
+      surface.tileScale.set(1 / resolution);
+      surface.anchor.set(0, 0.5);
+      const start = geometry.toScreen(pointAlong(belt, from));
+      surface.position.set(start.x, start.y);
+      surface.rotation = beltAngle(belt);
+      surface.width = geometry.toPixels(to - from);
+      surface.height = geometry.toPixels(BELT.surfaceM);
+      surfaceLayer.addChild(surface);
+      surfaces.set(belt.id, surface);
+    }
 
     for (const texture of old) texture.destroy(true);
   }
 
-  function bagTexture(baggage) {
-    const look = suitcaseLook(baggage);
-    const key = `${look.style}|${look.colour}|${look.label}|${baggage.length_m}`;
+  function bagTexture(baggage, angle) {
+    const look = suitcaseLook(baggage, destinations);
+    const key = `${look.style}|${look.colour}|${look.label}|${baggage.length_m}|${angle.toFixed(3)}`;
     if (!bagTextures.has(key)) {
       bagTextures.set(key, toTexture(suitcaseCanvas({
         ...look,
         lengthM: baggage.length_m,
         widthM: BAGGAGE_WIDTH_M,
+        angle,
         scale: geometry.pixelsPerMetre * resolution,
         seed: hashString(key),
       })));
@@ -95,28 +113,34 @@ export function createRenderer(app) {
     return bagTextures.get(key);
   }
 
-  // Scrolls the rubber surface by the distance the belt has travelled.
-  function moveSurface(timeS) {
-    const tileWidthM = surface.texture.width / geometry.pixelsPerMetre;
-    const { speed_m_s: speed } = layout.conveyors[0];
-    surface.tilePosition.x = geometry.toPixels(beltOffset(speed, timeS, tileWidthM));
+  // Scrolls each rubber surface by the distance its belt has travelled.
+  function moveSurfaces(timeS) {
+    for (const belt of layout.belts) {
+      const surface = surfaces.get(belt.id);
+      const tileWidthM = surface.texture.width / resolution / geometry.pixelsPerMetre;
+      surface.tilePosition.x = geometry.toPixels(beltOffset(belt.speed_m_s, timeS, tileWidthM));
+    }
   }
 
   function placeBaggage(timeS) {
     const present = new Set();
-    const padding = geometry.toPixels(BAG_PADDING_M);
-    for (const baggage of playback.baggageAt(timeS)) {
+    for (const baggage of playback.baggageAt(timeS, belts)) {
+      const belt = belts.get(baggage.conveyor_id);
+      if (!belt) continue;
+      const place = baggagePlacement(geometry, belt, baggage);
+      const texture = bagTexture(baggage, place.angle);
       present.add(baggage.id);
       let sprite = bagSprites.get(baggage.id);
       if (!sprite) {
-        sprite = new Sprite(bagTexture(baggage));
+        sprite = new Sprite(texture);
+        sprite.anchor.set(0.5);
         sprite.scale.set(1 / resolution);
         bagSprites.set(baggage.id, sprite);
         bagLayer.addChild(sprite);
       }
-      // The texture has room for the shadow around the bag itself.
-      const rect = baggageRect(geometry, baggage);
-      sprite.position.set(rect.x - padding, rect.y - padding);
+      // A bag on a belt with another direction needs the texture for that angle.
+      sprite.texture = texture;
+      sprite.position.set(place.x, place.y);
       sprite.alpha = baggage.alpha;
     }
     for (const [id, sprite] of bagSprites) {
@@ -133,7 +157,7 @@ export function createRenderer(app) {
     if (!geometry) buildScene();
     const timeS = playback.advance(nowSeconds());
     if (timeS === null) return;
-    moveSurface(timeS);
+    moveSurfaces(timeS);
     placeBaggage(timeS);
   }
   app.ticker.add(update);
@@ -147,6 +171,8 @@ export function createRenderer(app) {
     // A new layout arrives on every (re)connection: forget the old state.
     setLayout(newLayout) {
       layout = newLayout;
+      belts = new Map(layout.belts.map((belt) => [belt.id, belt]));
+      destinations = destinationLooks(layout.outputs);
       playback.reset();
       geometry = null;
     },

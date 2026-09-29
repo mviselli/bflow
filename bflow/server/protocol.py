@@ -2,7 +2,8 @@
 
 Every message is a JSON object with a ``type`` field. The server sends:
 
-- ``layout``: the route configuration, once on connection;
+- ``layout``: the plant (nodes, belts and their map coordinates), once
+  on connection;
 - ``snapshot``: the simulated state, several times per real second;
 - ``error``: a rejected command.
 
@@ -45,20 +46,51 @@ class TimedMessage(Message):
 # Server → browser
 
 
-class ConveyorInfo(Message):
+class PointInfo(Message):
+    """A point on the map, in metres; y grows downwards."""
+
+    x_m: float
+    y_m: float
+
+
+class NodeInfo(Message):
+    """A merge or a sorter: where belts join or split."""
+
     id: str = Field(min_length=1)
+    position: PointInfo
+
+
+class LabelledNodeInfo(NodeInfo):
+    """An input (check-in desk letter) or an output (demo flight code)."""
+
+    label: str = Field(min_length=1)
+
+
+class BeltInfo(Message):
+    """A straight belt; position 0 is at ``start`` and ``length_m`` at ``end``."""
+
+    id: str = Field(min_length=1)
+    source_id: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
+    start: PointInfo
+    end: PointInfo
     length_m: float = Field(gt=0)
     speed_m_s: float = Field(gt=0)
 
 
 class LayoutMessage(TimedMessage):
-    """Static description of the route, sent once on connection."""
+    """Static description of the plant, sent once on connection.
+
+    Elements are in layout order, as in the engine.
+    """
 
     type: Literal["layout"] = "layout"
     step_ms: int = Field(gt=0)
-    input_id: str = Field(min_length=1)
-    output_id: str = Field(min_length=1)
-    conveyors: list[ConveyorInfo]
+    inputs: list[LabelledNodeInfo]
+    merges: list[NodeInfo]
+    sorters: list[NodeInfo]
+    outputs: list[LabelledNodeInfo]
+    belts: list[BeltInfo]
     baggage_length_m: float = Field(gt=0)
     min_gap_m: float = Field(ge=0)
 
@@ -112,18 +144,21 @@ class ErrorMessage(Message):
 
 
 def layout_message(engine: Engine) -> LayoutMessage:
-    """Describes a one-belt route: the page cannot draw a larger plant yet."""
+    """Describes the engine's plant, copied from its layout configuration."""
     layout = engine.layout
-    if len(layout.belts) != 1:
-        raise ValueError("The page can only draw a one-belt route for now")
+
+    def copy(model, elements):
+        return [model.model_validate(element, from_attributes=True) for element in elements]
+
     return LayoutMessage(
         tick=engine.tick,
         time_s=engine.time_s,
         step_ms=STEP_MS,
-        input_id=layout.inputs[0].id,
-        output_id=layout.outputs[0].id,
-        conveyors=[ConveyorInfo.model_validate(belt, from_attributes=True)
-                   for belt in layout.belts],
+        inputs=copy(LabelledNodeInfo, layout.inputs),
+        merges=copy(NodeInfo, layout.merges),
+        sorters=copy(NodeInfo, layout.sorters),
+        outputs=copy(LabelledNodeInfo, layout.outputs),
+        belts=copy(BeltInfo, layout.belts),
         baggage_length_m=layout.baggage_length_m,
         min_gap_m=layout.min_gap_m,
     )

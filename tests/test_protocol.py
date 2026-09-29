@@ -63,16 +63,22 @@ def test_commands_are_immutable():
 # Tick and simulated time
 
 
-def test_initial_layout_describes_the_default_route():
+def test_initial_layout_describes_the_minimal_route():
     layout = layout_message(Engine())
     assert layout.model_dump() == {
         "type": "layout",
         "tick": 0,
         "time_s": 0.0,
         "step_ms": STEP_MS,
-        "input_id": "input-a",
-        "output_id": "output-1",
-        "conveyors": [{"id": "belt-1", "length_m": 10.0, "speed_m_s": 1.0}],
+        "inputs": [{"id": "input-a", "label": "A", "position": {"x_m": 0.0, "y_m": 0.0}}],
+        "merges": [],
+        "sorters": [],
+        "outputs": [{"id": "output-1", "label": "BF 101", "position": {"x_m": 10.0, "y_m": 0.0}}],
+        "belts": [{
+            "id": "belt-1", "source_id": "input-a", "target_id": "output-1",
+            "start": {"x_m": 0.0, "y_m": 0.0}, "end": {"x_m": 10.0, "y_m": 0.0},
+            "length_m": 10.0, "speed_m_s": 1.0,
+        }],
         "baggage_length_m": 0.6,
         "min_gap_m": 0.2,
     }
@@ -82,13 +88,31 @@ def test_layout_follows_a_custom_configuration():
     config = minimal_layout(length_m=4.0, speed_m_s=0.5, baggage_length_m=0.8, min_gap_m=0.0)
     layout = layout_message(run(Engine(config), 3))
     assert (layout.tick, layout.time_s) == (3, 0.15)
-    assert layout.conveyors[0].model_dump() == {"id": "belt-1", "length_m": 4.0, "speed_m_s": 0.5}
+    assert (layout.belts[0].length_m, layout.belts[0].speed_m_s) == (4.0, 0.5)
     assert (layout.baggage_length_m, layout.min_gap_m) == (0.8, 0.0)
 
 
-def test_layout_message_refuses_a_plant_the_page_cannot_draw_yet():
-    with pytest.raises(ValueError, match="one-belt route"):
-        layout_message(Engine(default_layout()))
+def test_layout_describes_the_whole_plant_in_layout_order():
+    config = default_layout()
+    layout = layout_message(Engine(config))
+    assert [(node.id, node.label) for node in layout.inputs] == [
+        (node.id, node.label) for node in config.inputs]
+    assert [(node.id, node.label) for node in layout.outputs] == [
+        (node.id, node.label) for node in config.outputs]
+    assert [node.id for node in layout.merges] == ["merge"]
+    assert layout.sorters[0].position.model_dump() == {"x_m": 20.0, "y_m": 4.0}
+    assert [belt.id for belt in layout.belts] == [belt.id for belt in config.belts]
+    for sent, belt in zip(layout.belts, config.belts):
+        assert (sent.source_id, sent.target_id) == (belt.source_id, belt.target_id)
+        assert (sent.start.x_m, sent.start.y_m, sent.end.x_m, sent.end.y_m) == (
+            belt.start.x_m, belt.start.y_m, belt.end.x_m, belt.end.y_m)
+        assert (sent.length_m, sent.speed_m_s) == (belt.length_m, belt.speed_m_s)
+
+
+def test_layout_does_not_include_input_rates():
+    # Rates will change at run time: they belong in the snapshots, not here.
+    layout = layout_message(Engine(default_layout())).model_dump()
+    assert set(layout["inputs"][0]) == {"id", "label", "position"}
 
 
 @pytest.mark.parametrize(("tick", "time_s"), [(1, 0.0), (0, 0.05), (20, 1.05)])

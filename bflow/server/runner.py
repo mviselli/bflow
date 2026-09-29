@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 
 from bflow.core.engine import STEP_MS, Engine
+from bflow.core.layout import default_layout
 from bflow.server.protocol import Command, PauseCommand, StartCommand
 
 
@@ -25,12 +26,13 @@ class Runner:
 
     The clock is a function returning real seconds (time.monotonic by
     default): tests pass a fake clock and call update() directly, without
-    waiting. The engine starts stopped at tick 0.
+    waiting. Without an engine it runs the full plant (default_layout()),
+    starting stopped at tick 0.
     """
 
     def __init__(self, engine: Engine | None = None, *,
                  clock: Callable[[], float] = time.monotonic) -> None:
-        self.engine = engine if engine is not None else Engine()
+        self.engine = engine if engine is not None else Engine(default_layout())
         self.clock = clock
         self.commands: asyncio.Queue[Command] = asyncio.Queue()
         self.running = False

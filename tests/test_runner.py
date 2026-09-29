@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from bflow.core.engine import Engine
+from bflow.core.layout import default_layout
 from bflow.server import runner as runner_module
 from bflow.server.protocol import PauseCommand, StartCommand
 from bflow.server.runner import MAX_TICKS_PER_UPDATE, Runner
@@ -25,6 +26,11 @@ class FakeClock:
 def make_runner() -> tuple[Runner, FakeClock]:
     clock = FakeClock()
     return Runner(clock=clock), clock
+
+
+def test_runner_runs_the_full_plant_by_default():
+    runner, _ = make_runner()
+    assert runner.engine.layout == default_layout()
 
 
 def test_runner_starts_stopped_at_tick_zero():
@@ -117,7 +123,7 @@ def test_runner_matches_an_engine_stepped_directly():
     for _ in range(600):
         clock.now += 0.05
         runner.update()
-    engine = Engine()
+    engine = Engine(default_layout())
     for _ in range(600):
         engine.step()
     assert runner.engine.stats() == engine.stats()

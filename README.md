@@ -6,8 +6,8 @@ browser view built with PixiJS.
 The engine models a plant with three check-in desks, a merge, a common line, a
 sorter and three output branches. Bags arrive at each desk, take turns at the
 merge and are sorted to their destination. Belts can be stopped and restarted.
-The command line runs the whole plant; the browser view still shows a single
-belt.
+The browser shows the whole plant; the command line runs it without the
+browser.
 
 ## Requirements
 

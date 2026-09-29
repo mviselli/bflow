@@ -10,7 +10,7 @@ import time
 from fastapi.testclient import TestClient
 
 from bflow.core.engine import Engine
-from bflow.core.layout import minimal_layout
+from bflow.core.layout import default_layout, minimal_layout
 from bflow.server.app import SNAPSHOT_INTERVAL_S, create_app
 from bflow.server.protocol import layout_message, snapshot_message
 from bflow.server.runner import Runner
@@ -145,10 +145,12 @@ def test_the_simulation_keeps_running_after_the_client_disconnects():
 
 
 def test_layout_then_full_snapshot_on_connection():
+    # The default server runs the full plant.
     app, _, _ = make_app()
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
-        assert ws.receive_json() == layout_message(Engine()).model_dump(mode="json")
-        assert ws.receive_json() == snapshot_message(Engine(), running=False).model_dump(mode="json")
+        plant = Engine(default_layout())
+        assert ws.receive_json() == layout_message(plant).model_dump(mode="json")
+        assert ws.receive_json() == snapshot_message(plant, running=False).model_dump(mode="json")
 
 
 def test_snapshots_follow_start_pause_and_resume():
@@ -158,29 +160,29 @@ def test_snapshots_follow_start_pause_and_resume():
         receive_until(ws, is_snapshot(0, True))
         # One second at a time: a larger jump would exceed the per-update
         # tick limit and the runner would drop the backlog.
-        for tick in (20, 40, 60):
+        for tick in (20, 40, 60, 80, 100):
             clock.now += 1
             snapshot = receive_until(ws, is_snapshot(tick, True))
-        # The first bag arrives at 2 s: the same state as an engine stepped
+        # The first bags arrive at 4 s: the same state as an engine stepped
         # directly, bags and counters included.
-        engine = Engine()
-        for _ in range(60):
+        engine = Engine(default_layout())
+        for _ in range(100):
             engine.step()
         assert snapshot == snapshot_message(engine, running=True).model_dump(mode="json")
         assert snapshot["baggage"]
 
         ws.send_text('{"type": "pause"}')
-        receive_until(ws, is_snapshot(60, False))
+        receive_until(ws, is_snapshot(100, False))
         clock.now += 5
         # Snapshots keep arriving while paused, with frozen time.
         for _ in range(3):
-            assert is_snapshot(60, False)(ws.receive_json())
+            assert is_snapshot(100, False)(ws.receive_json())
 
         ws.send_text('{"type": "start"}')
         # Wait until the runner has resumed before moving the clock.
-        receive_until(ws, is_snapshot(60, True))
+        receive_until(ws, is_snapshot(100, True))
         clock.now += 0.5
-        receive_until(ws, is_snapshot(70, True))
+        receive_until(ws, is_snapshot(110, True))
 
 
 def test_each_event_is_sent_once_per_connection():
