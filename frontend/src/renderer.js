@@ -10,13 +10,20 @@
 // which gives the simulated time to draw and the bags between the two
 // snapshots around it: the renderer never invents movement, and when the
 // simulation is paused the bags and the belt surfaces stop with it.
+//
+// Zoom and panning move a camera (geometry.js). All layers sit in one
+// `world` container: while the view changes the container is scaled and
+// moved at once, and when it has been still for REBUILD_DELAY_MS the
+// textures are redrawn sharp for the new view. Clicking a bag or a belt
+// selects it: an outline follows it and onSelect reports it.
 
-import { Container, Sprite, TilingSprite } from 'pixi.js';
+import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import {
   BELT, beltSurfaceCanvas, floorCanvas, frameCanvas, suitcaseCanvas, surfaceSpan, toTexture,
 } from './assets.js';
 import {
-  BAGGAGE_WIDTH_M, baggagePlacement, beltAngle, beltEnds, plantGeometry, pointAlong,
+  BAGGAGE_WIDTH_M, BELT_WIDTH_M, FIT_CAMERA, baggagePlacement, beltAngle, beltEnds, clampCamera, panBy,
+  pickAt, plantGeometry, pointAlong, zoomAround,
 } from './geometry.js';
 import { destinationLooks, hashString, shortCode, suitcaseLook } from './looks.js';
 import { beltOffset, createPlayback } from './playback.js';
@@ -26,18 +33,48 @@ function nowSeconds() {
   return performance.now() / 1000;
 }
 
-export function createRenderer(app) {
+// Redraw the textures once the view has been still for this long.
+const REBUILD_DELAY_MS = 150;
+// A press that moves less than this is a click, not a drag (pixels).
+const CLICK_SLOP_PX = 4;
+// Extra reach around bags and belts when picking, in screen pixels.
+const PICK_TOLERANCE_PX = 6;
+const SELECTION_COLOUR = 0xf2c230;
+
+// Outline of a rectangle along a belt: from `from` to `to` metres along it,
+// `widthM` wide, in screen pixels of `geometry`.
+function outlineAlong(graphics, geometry, belt, from, to, widthM) {
+  const angle = beltAngle(belt);
+  const across = { x: -Math.sin(angle) * widthM / 2, y: Math.cos(angle) * widthM / 2 };
+  const corners = [
+    [pointAlong(belt, from), 1], [pointAlong(belt, to), 1],
+    [pointAlong(belt, to), -1], [pointAlong(belt, from), -1],
+  ].map(([point, side]) => geometry.toScreen({
+    x_m: point.x_m + side * across.x, y_m: point.y_m + side * across.y,
+  }));
+  graphics.poly(corners.flatMap(({ x, y }) => [x, y]))
+    .stroke({ width: 2, color: SELECTION_COLOUR, alignment: 1 });
+}
+
+export function createRenderer(app, { onSelect = () => {} } = {}) {
+  const world = new Container();
   const floor = new Sprite();
   const surfaceLayer = new Container();
   const frame = new Sprite();
+  const highlight = new Graphics();
   const bagLayer = new Container();
-  app.stage.addChild(floor, surfaceLayer, frame, bagLayer);
+  world.addChild(floor, surfaceLayer, frame, highlight, bagLayer);
+  app.stage.addChild(world);
 
   let layout = null;
   let belts = new Map();          // belt id → belt from the layout
   let destinations = new Map();   // output id → { code, colour }
   const playback = createPlayback();
-  let geometry = null;
+  let geometry = null;            // the view the textures were drawn for
+  let camera = FIT_CAMERA;        // the view to show
+  let rebuildTimer = null;
+  let drawnBags = [];             // bags of the last frame, as drawn
+  let selection = null;           // { kind: 'bag' | 'belt', id } or null
   let resolution = 1;
   let sceneTextures = [];
   const surfaces = new Map();     // belt id → TilingSprite of its moving surface
@@ -67,7 +104,11 @@ export function createRenderer(app) {
 
     resolution = app.renderer.resolution;
     const { width, height } = app.screen;
-    geometry = plantGeometry(layout, width, height);
+    // A resize can leave the old centre out of range.
+    if (camera.centre) camera = clampCamera(layout, camera, width, height);
+    geometry = plantGeometry(layout, width, height, camera);
+    world.position.set(0, 0);
+    world.scale.set(1);
     const common = { geometry, layout, screenWidth: width, screenHeight: height, resolution };
     const inputCodes = new Map(layout.inputs.map((input) => [input.id, shortCode(input.id)]));
 
@@ -124,7 +165,8 @@ export function createRenderer(app) {
 
   function placeBaggage(timeS) {
     const present = new Set();
-    for (const baggage of playback.baggageAt(timeS, belts)) {
+    drawnBags = playback.baggageAt(timeS, belts);
+    for (const baggage of drawnBags) {
       const belt = belts.get(baggage.conveyor_id);
       if (!belt) continue;
       const place = baggagePlacement(geometry, belt, baggage);
@@ -151,6 +193,38 @@ export function createRenderer(app) {
     }
   }
 
+  // Selects what was picked (or nothing); a bag also reports its destination.
+  function select(picked) {
+    const same = picked?.kind === selection?.kind && picked?.id === selection?.id;
+    if (same) return;
+    selection = picked;
+    if (selection?.kind === 'bag') {
+      const baggage = drawnBags.find((bag) => bag.id === selection.id);
+      selection = { ...selection, destination_id: baggage?.destination_id ?? null };
+    }
+    onSelect(selection);
+  }
+
+  // Outline around the selected belt or bag, following the bag as it moves.
+  // A selected bag that has left the plant is no longer selected.
+  function drawHighlight() {
+    highlight.clear();
+    if (!selection) return;
+    if (selection.kind === 'belt') {
+      const belt = belts.get(selection.id);
+      if (belt) outlineAlong(highlight, geometry, belt, 0, belt.length_m, BELT_WIDTH_M + 0.1);
+      return;
+    }
+    const baggage = drawnBags.find((bag) => bag.id === selection.id);
+    const belt = baggage && belts.get(baggage.conveyor_id);
+    if (!belt) {
+      select(null);
+      return;
+    }
+    outlineAlong(highlight, geometry, belt, baggage.position_m - 0.08,
+      baggage.position_m + baggage.length_m + 0.08, BAGGAGE_WIDTH_M + 0.16);
+  }
+
   // Called by the PixiJS ticker before each frame is rendered.
   function update() {
     if (!layout) return;
@@ -159,13 +233,90 @@ export function createRenderer(app) {
     if (timeS === null) return;
     moveSurfaces(timeS);
     placeBaggage(timeS);
+    drawHighlight();
   }
   app.ticker.add(update);
+
+  // Shows the camera at once by moving the world container over the
+  // textures already drawn, then redraws them once the view stays still.
+  function setCamera(next) {
+    camera = next;
+    if (!geometry) return;
+    const { width, height } = app.screen;
+    const view = plantGeometry(layout, width, height, camera);
+    const scale = view.pixelsPerMetre / geometry.pixelsPerMetre;
+    world.scale.set(scale);
+    world.position.set(view.originX - geometry.originX * scale, view.originY - geometry.originY * scale);
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => {
+      geometry = null;
+    }, REBUILD_DELAY_MS);
+  }
+
+  // Screen point of a pointer event, in the canvas's CSS pixels.
+  function pointerPoint(event) {
+    const box = app.canvas.getBoundingClientRect();
+    return { x: event.clientX - box.left, y: event.clientY - box.top };
+  }
+
+  // What is under a screen point, in the view currently shown.
+  function pickScreen(point) {
+    const { width, height } = app.screen;
+    const view = plantGeometry(layout, width, height, camera);
+    return pickAt(view.toMap(point), drawnBags, belts, PICK_TOLERANCE_PX / view.pixelsPerMetre);
+  }
+
+  // Mouse wheel zooms around the pointer; dragging pans; a click selects.
+  const canvas = app.canvas;
+  let press = null;  // { id, start, last, dragging } while a pointer is down
+  canvas.addEventListener('wheel', (event) => {
+    if (!layout) return;
+    event.preventDefault();
+    const { width, height } = app.screen;
+    const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015));
+    setCamera(zoomAround(layout, camera, width, height, pointerPoint(event), factor));
+  }, { passive: false });
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!layout || event.button !== 0) return;
+    const point = pointerPoint(event);
+    press = { id: event.pointerId, start: point, last: point, dragging: false };
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (!layout) return;
+    const point = pointerPoint(event);
+    if (!press || press.id !== event.pointerId) {
+      canvas.style.cursor = pickScreen(point) ? 'pointer' : camera.zoom > 1 ? 'grab' : '';
+      return;
+    }
+    const moved = Math.hypot(point.x - press.start.x, point.y - press.start.y);
+    if (!press.dragging && moved < CLICK_SLOP_PX) return;
+    press.dragging = true;
+    canvas.style.cursor = 'grabbing';
+    const { width, height } = app.screen;
+    setCamera(panBy(layout, camera, width, height, point.x - press.last.x, point.y - press.last.y));
+    press.last = point;
+  });
+  canvas.addEventListener('pointerup', (event) => {
+    if (!press || press.id !== event.pointerId) return;
+    if (!press.dragging) select(pickScreen(pointerPoint(event)));
+    press = null;
+    canvas.style.cursor = '';
+  });
+  canvas.addEventListener('pointercancel', () => {
+    press = null;
+  });
 
   // Resizing fires many events: rebuild the textures once, on the next frame.
   app.renderer.on('resize', () => {
     geometry = null;
   });
+
+  function zoomBy(factor) {
+    if (!layout) return;
+    const { width, height } = app.screen;
+    setCamera(zoomAround(layout, camera, width, height, { x: width / 2, y: height / 2 }, factor));
+  }
 
   return {
     // A new layout arrives on every (re)connection: forget the old state.
@@ -174,8 +325,16 @@ export function createRenderer(app) {
       belts = new Map(layout.belts.map((belt) => [belt.id, belt]));
       destinations = destinationLooks(layout.outputs);
       playback.reset();
+      camera = FIT_CAMERA;
       geometry = null;
+      drawnBags = [];
+      select(null);
     },
+    zoomIn: () => zoomBy(1.5),
+    zoomOut: () => zoomBy(1 / 1.5),
+    // Back to the whole plant.
+    fit: () => layout && setCamera(FIT_CAMERA),
+    clearSelection: () => select(null),
     setSnapshot(snapshot) {
       playback.add(snapshot, nowSeconds());
     },

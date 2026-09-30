@@ -19,7 +19,14 @@
           <p id="connection" data-state="disconnected">Connecting…</p>
         </div>
         <p id="status" role="status">Initializing graphics…</p>
-        <div id="map"></div>
+        <div id="map">
+          <div class="map-tools" role="group" aria-label="View">
+            <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+            <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+            <button id="fit" type="button" aria-label="Show the whole plant">Fit</button>
+          </div>
+        </div>
+        <p id="selection" aria-live="polite"></p>
         <dl id="counters" aria-label="Engine counters"></dl>
       </section>
     </main>

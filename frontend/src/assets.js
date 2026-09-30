@@ -9,7 +9,7 @@
 // The shapes are decoration only: positions and collisions stay in Python.
 
 import { Texture } from 'pixi.js';
-import { BELT_WIDTH_M, beltAngle, beltEnds, plantJoints } from './geometry.js';
+import { BELT_WIDTH_M, PLANT_MARGIN_M, beltAngle, beltEnds, plantJoints } from './geometry.js';
 
 // Shadow offset in metres per metre of height above the floor.
 const LIGHT = { x: 0.35, y: 0.55 };
@@ -168,7 +168,10 @@ export function surfaceSpan(belt, ends) {
   };
 }
 
-function drawTiles(ctx, view, random) {
+// Floor tiles over the visible area. Each tile's shade and grain come from
+// its own position on the map, so the floor looks the same whatever part of
+// it is drawn (after zooming or panning).
+function drawTiles(ctx, view) {
   const tile = 0.6;
   const grout = 0.012;
   ctx.fillStyle = '#12171c';
@@ -177,20 +180,23 @@ function drawTiles(ctx, view, random) {
   const firstRow = Math.floor(view.top / tile);
   for (let column = firstColumn; column * tile < view.left + view.width; column += 1) {
     for (let row = firstRow; row * tile < view.top + view.height; row += 1) {
+      const random = seededRandom(Math.imul(column, 73856093) ^ Math.imul(row, 19349663));
       const lightness = 15 + random() * 4;
       ctx.fillStyle = `hsl(210, 12%, ${lightness}%)`;
       ctx.fillRect(column * tile + grout / 2, row * tile + grout / 2, tile - grout, tile - grout);
+      grain(ctx, random, column * tile, row * tile, tile, tile,
+        Math.round(tile * tile * 350), 0.012, 0.12);
     }
   }
-  grain(ctx, random, view.left, view.top, view.width, view.height,
-    Math.round(view.width * view.height * 350), 0.012, 0.12);
 }
 
 function drawLighting(ctx, view, bounds) {
-  // A soft pool of light over the plant, darker towards the screen edges.
+  // A soft pool of light over the plant, darker away from it. Its size comes
+  // from the plant, not from the view, so it stays in place when zooming.
   const centreX = (bounds.left + bounds.right) / 2;
   const centreY = (bounds.top + bounds.bottom) / 2;
-  const radius = Math.max(view.width, view.height) * 0.65;
+  const radius = Math.max(bounds.right - bounds.left, bounds.bottom - bounds.top)
+    / 2 * 1.3 + PLANT_MARGIN_M;
   const light = ctx.createRadialGradient(centreX, centreY, 0, centreX, centreY, radius);
   light.addColorStop(0, 'rgba(160, 190, 215, 0.10)');
   light.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
@@ -382,13 +388,12 @@ function drawFloorCaption(ctx, scale, position, caption) {
 // colours (see looks.js).
 export function floorCanvas({ geometry, layout, screenWidth, screenHeight, resolution, inputCodes, destinations }) {
   const { canvas, ctx, scale, view } = sceneCanvas(geometry, screenWidth, screenHeight, resolution);
-  const random = seededRandom(42);
   const ends = beltEnds(layout);
   const joints = plantJoints(layout);
   const firstBelt = new Map(layout.belts.map((belt) => [belt.source_id, belt]));
   const lastBelt = new Map(layout.belts.map((belt) => [belt.target_id, belt]));
 
-  drawTiles(ctx, view, random);
+  drawTiles(ctx, view);
   for (const belt of layout.belts) drawDirectionArrows(ctx, belt);
   drawBeltShadows(ctx, scale, layout, ends, joints);
   for (const input of layout.inputs) {

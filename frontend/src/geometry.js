@@ -31,17 +31,29 @@ export function plantBounds(layout) {
   };
 }
 
-// Builds the conversion for the whole plant drawn in a screen area. The
-// scale is the largest that fits the plant plus its margins; the plant is
-// then centred on the screen.
-export function plantGeometry(layout, screenWidth, screenHeight) {
-  const bounds = plantBounds(layout);
+// The camera: how much the view is magnified (1 = the whole plant fits) and
+// the map point shown at the centre of the screen (null = the plant's centre).
+export const FIT_CAMERA = { zoom: 1, centre: null };
+export const MAX_ZOOM = 6;
+
+// Scale at which the plant plus its margins just fits the screen area.
+function fitScale(bounds, screenWidth, screenHeight) {
   const widthM = bounds.right - bounds.left + 2 * PLANT_MARGIN_M;
   const heightM = bounds.bottom - bounds.top + 2 * PLANT_MARGIN_M;
-  const pixelsPerMetre = Math.max(Math.min(screenWidth / widthM, screenHeight / heightM), 1e-3);
+  return Math.max(Math.min(screenWidth / widthM, screenHeight / heightM), 1e-3);
+}
+
+// Builds the conversion for the plant drawn in a screen area, seen through
+// the camera. With FIT_CAMERA the scale is the largest that fits the plant
+// plus its margins, and the plant is centred on the screen.
+export function plantGeometry(layout, screenWidth, screenHeight, camera = FIT_CAMERA) {
+  const bounds = plantBounds(layout);
+  const pixelsPerMetre = fitScale(bounds, screenWidth, screenHeight) * camera.zoom;
+  const centre = camera.centre
+    ?? { x_m: (bounds.left + bounds.right) / 2, y_m: (bounds.top + bounds.bottom) / 2 };
   // Screen position of the map origin (0, 0).
-  const originX = screenWidth / 2 - ((bounds.left + bounds.right) / 2) * pixelsPerMetre;
-  const originY = screenHeight / 2 - ((bounds.top + bounds.bottom) / 2) * pixelsPerMetre;
+  const originX = screenWidth / 2 - centre.x_m * pixelsPerMetre;
+  const originY = screenHeight / 2 - centre.y_m * pixelsPerMetre;
 
   return {
     pixelsPerMetre,
@@ -55,7 +67,55 @@ export function plantGeometry(layout, screenWidth, screenHeight) {
       x: originX + point.x_m * pixelsPerMetre,
       y: originY + point.y_m * pixelsPerMetre,
     }),
+    // A screen point in pixels as a map point in metres: the inverse, used to
+    // find what the pointer is on.
+    toMap: (screen) => ({
+      x_m: (screen.x - originX) / pixelsPerMetre,
+      y_m: (screen.y - originY) / pixelsPerMetre,
+    }),
   };
+}
+
+// Keeps a camera within limits: zoom between 1 and MAX_ZOOM, and a centre
+// that never shows more than the area seen with the whole plant fitted, so
+// the plant cannot be dragged off the screen.
+export function clampCamera(layout, camera, screenWidth, screenHeight) {
+  const zoom = Math.min(Math.max(camera.zoom, 1), MAX_ZOOM);
+  const fitted = plantGeometry(layout, screenWidth, screenHeight);
+  const topLeft = fitted.toMap({ x: 0, y: 0 });
+  const bottomRight = fitted.toMap({ x: screenWidth, y: screenHeight });
+  const halfWidth = (bottomRight.x_m - topLeft.x_m) / zoom / 2;
+  const halfHeight = (bottomRight.y_m - topLeft.y_m) / zoom / 2;
+  const centre = camera.centre ?? fitted.toMap({ x: screenWidth / 2, y: screenHeight / 2 });
+  const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
+  return {
+    zoom,
+    centre: {
+      x_m: clamp(centre.x_m, topLeft.x_m + halfWidth, bottomRight.x_m - halfWidth),
+      y_m: clamp(centre.y_m, topLeft.y_m + halfHeight, bottomRight.y_m - halfHeight),
+    },
+  };
+}
+
+// The camera after zooming by `factor` around a screen point, which keeps
+// the map point under it in place (the pointer, for the mouse wheel).
+export function zoomAround(layout, camera, screenWidth, screenHeight, screen, factor) {
+  const before = plantGeometry(layout, screenWidth, screenHeight, camera);
+  const anchor = before.toMap(screen);
+  const zoom = Math.min(Math.max(camera.zoom * factor, 1), MAX_ZOOM);
+  const pixelsPerMetre = before.pixelsPerMetre * (zoom / camera.zoom);
+  const centre = {
+    x_m: anchor.x_m - (screen.x - screenWidth / 2) / pixelsPerMetre,
+    y_m: anchor.y_m - (screen.y - screenHeight / 2) / pixelsPerMetre,
+  };
+  return clampCamera(layout, { zoom, centre }, screenWidth, screenHeight);
+}
+
+// The camera after dragging the map by (dx, dy) screen pixels.
+export function panBy(layout, camera, screenWidth, screenHeight, dx, dy) {
+  const geometry = plantGeometry(layout, screenWidth, screenHeight, camera);
+  const centre = geometry.toMap({ x: screenWidth / 2 - dx, y: screenHeight / 2 - dy });
+  return clampCamera(layout, { zoom: camera.zoom, centre }, screenWidth, screenHeight);
 }
 
 // Direction of travel of a belt, in radians (0 = right, π/2 = down).
@@ -147,4 +207,44 @@ export function plantJoints(layout) {
     };
   });
   return [...nodes, ...corners];
+}
+
+// A map point in the frame of a belt: `along` from its start in the
+// direction of travel, `across` from its centre line.
+function inBeltFrame(belt, point) {
+  const ux = (belt.end.x_m - belt.start.x_m) / belt.length_m;
+  const uy = (belt.end.y_m - belt.start.y_m) / belt.length_m;
+  const dx = point.x_m - belt.start.x_m;
+  const dy = point.y_m - belt.start.y_m;
+  return { along: dx * ux + dy * uy, across: dy * ux - dx * uy };
+}
+
+// What is under a map point: a bag if the point is on one (bags are drawn
+// above the belts), otherwise a belt, otherwise null. `bags` are the bags as
+// drawn (belt and position_m), `belts` maps ids to the layout's belts, and
+// `toleranceM` widens every shape a little so small bags are easy to hit.
+// When shapes overlap (a bag crossing a plate, belts meeting at a joint) the
+// one whose centre line is nearest wins. Returns { kind, id } or null.
+export function pickAt(point, bags, belts, toleranceM = 0) {
+  let best = null;
+  for (const bag of bags) {
+    const belt = belts.get(bag.conveyor_id);
+    if (!belt) continue;
+    const { along, across } = inBeltFrame(belt, point);
+    const fromCentre = Math.abs(along - (bag.position_m + bag.length_m / 2));
+    const hit = fromCentre <= bag.length_m / 2 + toleranceM
+      && Math.abs(across) <= BAGGAGE_WIDTH_M / 2 + toleranceM;
+    const distance = Math.hypot(fromCentre, across);
+    if (hit && (!best || distance < best.distance)) best = { kind: 'bag', id: bag.id, distance };
+  }
+  if (best) return { kind: best.kind, id: best.id };
+  for (const belt of belts.values()) {
+    const { along, across } = inBeltFrame(belt, point);
+    const hit = along >= -toleranceM && along <= belt.length_m + toleranceM
+      && Math.abs(across) <= BELT_WIDTH_M / 2 + toleranceM;
+    if (hit && (!best || Math.abs(across) < best.distance)) {
+      best = { kind: 'belt', id: belt.id, distance: Math.abs(across) };
+    }
+  }
+  return best && { kind: best.kind, id: best.id };
 }

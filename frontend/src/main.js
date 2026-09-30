@@ -21,7 +21,21 @@ async function initialize() {
   app.canvas.setAttribute('aria-label', 'Baggage plant from the check-in desks to the outputs');
   status.textContent = 'Connecting to the simulation server…';
 
-  const renderer = createRenderer(app);
+  let layout = null;
+  const selection = document.querySelector('#selection');
+  const hint = 'Click a bag or a belt to select it. Scroll to zoom, drag to move the view.';
+  selection.textContent = hint;
+  const renderer = createRenderer(app, {
+    onSelect(selected) {
+      selection.textContent = selected ? describeSelection(selected, layout) : hint;
+    },
+  });
+  document.querySelector('#zoom-in').addEventListener('click', () => renderer.zoomIn());
+  document.querySelector('#zoom-out').addEventListener('click', () => renderer.zoomOut());
+  document.querySelector('#fit').addEventListener('click', () => renderer.fit());
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') renderer.clearSelection();
+  });
   let link = null;
   const controls = createControls({ onCommand: (command) => link.send(command) });
 
@@ -31,13 +45,24 @@ async function initialize() {
       status.textContent = connected ? '' : 'Waiting for the simulation server…';
     },
     onMessage(message) {
-      if (message.type === 'layout') renderer.setLayout(message);
+      if (message.type === 'layout') {
+        layout = message;
+        renderer.setLayout(message);
+      }
       else if (message.type === 'snapshot') {
         renderer.setSnapshot(message);
         controls.setSnapshot(message);
       } else if (message.type === 'error') console.warn(message.message);
     },
   });
+}
+
+// One line about the selected bag or belt; the side panel will show more.
+function describeSelection(selected, layout) {
+  if (selected.kind === 'belt') return `Selected belt ${selected.id} · Esc to clear`;
+  const output = layout?.outputs.find((node) => node.id === selected.destination_id);
+  const destination = output ? ` going to ${output.label}` : '';
+  return `Selected bag ${selected.id}${destination} · Esc to clear`;
 }
 
 initialize().catch((error) => {

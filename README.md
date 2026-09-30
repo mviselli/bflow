@@ -33,8 +33,10 @@ npm --prefix frontend run dev
 ```
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Use **Start**, **Pause**
-and **Resume**; the counters in the top bar come from the engine. Stop both
-servers with `Ctrl+C`.
+and **Resume**; the counters in the top bar come from the engine. Scroll over
+the map to zoom, drag to move the view and use **Fit** to see the whole plant
+again. Click a bag or a belt to select it; `Esc` clears the selection. Stop
+both servers with `Ctrl+C`.
 
 ## Run from the command line
 

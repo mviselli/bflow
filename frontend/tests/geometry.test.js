@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  PLANT_MARGIN_M, baggagePlacement, beltAngle, beltEnds, jointPoint, plantBounds, plantGeometry,
-  plantJoints, pointAlong,
+  MAX_ZOOM, PLANT_MARGIN_M, baggagePlacement, beltAngle, beltEnds, clampCamera, jointPoint, panBy,
+  pickAt, plantBounds, plantGeometry, plantJoints, pointAlong, zoomAround,
 } from '../src/geometry.js';
 import { formatTime } from '../src/controls.js';
 
@@ -185,6 +185,75 @@ test('joints are the merges, the sorters and the corners, with their open sides'
   assert.deepEqual(sides(joints[1]), [0, 1, 2, 3]);     // sorter: in from the left, out three ways
   assert.deepEqual(sides(joints[2]), [1, 2]);           // corner: from the left, then down
   assert.deepEqual(sides(joints[4]), [0, 1]);           // corner: from below, then right
+});
+
+test('the map point under a screen point is the inverse of drawing it', () => {
+  const geometry = plantGeometry(PLANT, 1000, 500, { zoom: 2.5, centre: point(20, 4) });
+  const screen = geometry.toScreen(point(13.7, 6.2));
+  const back = geometry.toMap(screen);
+  close(back.x_m, 13.7);
+  close(back.y_m, 6.2);
+  // The camera's centre is drawn at the centre of the screen.
+  const middle = geometry.toScreen(point(20, 4));
+  close(middle.x, 500);
+  close(middle.y, 250);
+});
+
+test('zoom multiplies the fitted scale', () => {
+  const fitted = plantGeometry(PLANT, 1000, 500);
+  close(plantGeometry(PLANT, 1000, 500, { zoom: 3, centre: null }).pixelsPerMetre,
+    3 * fitted.pixelsPerMetre);
+});
+
+test('zooming around a point keeps the map point under it in place', () => {
+  const screen = { x: 800, y: 150 };
+  const before = plantGeometry(PLANT, 1000, 500).toMap(screen);
+  const camera = zoomAround(PLANT, { zoom: 1, centre: null }, 1000, 500, screen, 2);
+  assert.equal(camera.zoom, 2);
+  const after = plantGeometry(PLANT, 1000, 500, camera).toMap(screen);
+  close(after.x_m, before.x_m);
+  close(after.y_m, before.y_m);
+});
+
+test('zoom stays between the whole plant and the maximum', () => {
+  const out = zoomAround(PLANT, { zoom: 1.2, centre: null }, 1000, 500, { x: 10, y: 10 }, 0.1);
+  assert.equal(out.zoom, 1);
+  const inside = zoomAround(PLANT, { zoom: 5, centre: null }, 1000, 500, { x: 500, y: 250 }, 10);
+  assert.equal(inside.zoom, MAX_ZOOM);
+});
+
+test('the view cannot be dragged beyond the area of the fitted plant', () => {
+  const fitted = plantGeometry(PLANT, 1000, 500);
+  const middle = fitted.toMap({ x: 500, y: 250 });
+  // With the whole plant shown there is nothing to pan.
+  const still = panBy(PLANT, { zoom: 1, centre: null }, 1000, 500, 300, -200);
+  close(still.centre.x_m, middle.x_m);
+  close(still.centre.y_m, middle.y_m);
+  // Zoomed in 2×, dragging far to the right stops with the left edges aligned.
+  const dragged = panBy(PLANT, { zoom: 2, centre: middle }, 1000, 500, 5000, 0);
+  const view = plantGeometry(PLANT, 1000, 500, dragged);
+  close(view.toMap({ x: 0, y: 0 }).x_m, fitted.toMap({ x: 0, y: 0 }).x_m);
+  // A moderate drag moves the map with the pointer.
+  const moved = panBy(PLANT, { zoom: 2, centre: middle }, 1000, 500, 100, 0);
+  close(moved.centre.x_m, middle.x_m - 100 / (2 * fitted.pixelsPerMetre));
+  const same = clampCamera(PLANT, moved, 1000, 500);
+  assert.deepEqual(same, moved);
+});
+
+test('picking finds a bag first, then the belt under the point', () => {
+  const belts = new Map(PLANT.belts.map((b) => [b.id, b]));
+  // collector runs from (8, 4) to (20, 4); a 0.6 m bag with its rear edge at 2 m.
+  const bags = [{ id: 'bag-1', conveyor_id: 'collector', position_m: 2, length_m: 0.6 }];
+  assert.deepEqual(pickAt(point(10.3, 4.1), bags, belts), { kind: 'bag', id: 'bag-1' });
+  assert.deepEqual(pickAt(point(11, 4.4), bags, belts), { kind: 'belt', id: 'collector' });
+  assert.equal(pickAt(point(11, 5.2), bags, belts), null);
+  // A small tolerance reaches just outside the shapes.
+  assert.deepEqual(pickAt(point(10.3, 4.3), bags, belts, 0.1), { kind: 'bag', id: 'bag-1' });
+  assert.deepEqual(pickAt(point(11, 4.55), bags, belts, 0.1), { kind: 'belt', id: 'collector' });
+  // On the merge's plate the belt whose centre line is nearest wins: 0.1 m
+  // from feeder-a-2 (coming down at x = 8), 0.2 m from the collector.
+  assert.deepEqual(pickAt(point(8.1, 3.8), [], belts), { kind: 'belt', id: 'feeder-a-2' });
+  assert.deepEqual(pickAt(point(8.3, 3.9), [], belts), { kind: 'belt', id: 'collector' });
 });
 
 test('an empty layout is rejected', () => {
