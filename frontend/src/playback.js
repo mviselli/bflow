@@ -14,6 +14,11 @@
 
 import { jointPoint } from './geometry.js';
 
+// The times below are real seconds. At 2× or 5× (the snapshot's `speed`)
+// they cover 2 or 5 times as many simulated seconds, since snapshots still
+// arrive about 12 times per real second but are further apart in simulated
+// time.
+//
 // How far the display clock stays behind the newest snapshot: about two
 // snapshot intervals, so a late snapshot does not stop the movement.
 export const DISPLAY_DELAY_S = 0.15;
@@ -38,6 +43,11 @@ export function createPlayback() {
     return snapshots[snapshots.length - 1];
   }
 
+  // Simulated seconds per real second, as the server reports it.
+  function speed() {
+    return newest().speed ?? 1;
+  }
+
   // Simulated time the display clock is heading to. While running, the
   // server has simulated about as long as the real time since the newest
   // snapshot arrived; while paused no newer snapshot will come, so the clock
@@ -45,7 +55,7 @@ export function createPlayback() {
   function target(nowS) {
     const latest = newest();
     if (!latest.running) return latest.time_s;
-    return latest.time_s + (nowS - arrival) - DISPLAY_DELAY_S;
+    return latest.time_s + (nowS - arrival - DISPLAY_DELAY_S) * speed();
   }
 
   function reset() {
@@ -70,7 +80,7 @@ export function createPlayback() {
         snapshots.push(snapshot);
         arrival = nowS;
       }
-      while (snapshots.length > 2 && snapshot.time_s - snapshots[1].time_s > HISTORY_S) {
+      while (snapshots.length > 2 && snapshot.time_s - snapshots[1].time_s > HISTORY_S * speed()) {
         snapshots.shift();
       }
       if (arrival === null) arrival = nowS;
@@ -84,12 +94,12 @@ export function createPlayback() {
       const frameS = lastFrame === null ? 0 : Math.min(Math.max(nowS - lastFrame, 0), MAX_FRAME_S);
       lastFrame = nowS;
 
-      // The simulation runs at 1×: one simulated second per real second,
-      // plus a gentle correction towards the target.
+      // The simulation runs at the server's speed (simulated seconds per
+      // real second), plus a gentle correction towards the target.
       const goal = target(nowS);
-      const next = displayTime + frameS;
+      const next = displayTime + frameS * speed();
       const error = goal - next;
-      displayTime = Math.abs(error) > MAX_DRIFT_S
+      displayTime = Math.abs(error) > MAX_DRIFT_S * speed()
         ? goal
         : next + error * Math.min(1, CATCH_UP_PER_S * frameS);
       // Only draw times covered by the snapshots received.
@@ -171,8 +181,10 @@ export function interpolateBaggage(previousBags, nextBags, fraction, belts = new
   return result.filter((baggage) => baggage.alpha > 0);
 }
 
-// Offset of the belt surface in metres, in [0, repeatM): the rubber moves
-// with the belt speed and the simulated time, so it stops when time stops.
-export function beltOffset(speedMS, timeS, repeatM) {
-  return (speedMS * timeS) % repeatM;
+// Offset of a belt surface in metres, in [0, repeatM), after dtS more
+// simulated seconds: the rubber moves with the belt's speed and simulated
+// time, so it stops when time stops, and a stopped belt passes 0 as its speed.
+export function advanceSurface(offsetM, speedMS, dtS, repeatM) {
+  const offset = (offsetM + speedMS * dtS) % repeatM;
+  return offset < 0 ? offset + repeatM : offset;
 }

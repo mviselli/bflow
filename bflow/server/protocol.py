@@ -7,9 +7,11 @@ Every message is a JSON object with a ``type`` field. The server sends:
 - ``snapshot``: the simulated state, several times per real second;
 - ``error``: a rejected command.
 
-The browser sends commands (``start``, ``pause``). parse_command() accepts
-only known commands with exactly their fields; anything else raises
-pydantic.ValidationError before reaching the runner.
+The browser sends commands: ``start``, ``pause``, ``reset``, ``set_speed``,
+``set_rate``, ``stop_belt`` and ``restart_belt``. parse_command() accepts
+only known commands with exactly their fields and values in range; anything
+else raises pydantic.ValidationError before reaching the runner, which then
+checks that the belt or input exists.
 
 Layout and snapshot carry the tick and simulated time they describe. The two
 must agree (time_s = tick × 50 ms): a message cannot mix different instants.
@@ -110,6 +112,13 @@ class BaggageState(Message):
     entered_at_s: float = Field(ge=0)
 
 
+class InputState(Message):
+    """An input's current arrival rate, which the operator can change."""
+
+    id: str = Field(min_length=1)
+    arrival_rate_bags_s: float = Field(ge=0)
+
+
 class BeltState(Message):
     """The operator's local stop of one belt (not the global pause)."""
 
@@ -126,6 +135,13 @@ class BeltStatsState(Message):
     occupancy: float = Field(ge=0)
 
 
+class InputStatsState(Message):
+    """Bags generated at one input and still waiting to be admitted."""
+
+    input_id: str = Field(min_length=1)
+    waiting: int = Field(ge=0)
+
+
 class StatsState(Message):
     """Counters computed by the engine; the browser displays them as they are."""
 
@@ -138,8 +154,9 @@ class StatsState(Message):
     mean_travel_time_s: float | None = Field(ge=0)
     errors: int = Field(ge=0)
     warnings: int = Field(ge=0)
-    # One entry per belt, in layout order.
+    # One entry per belt and per input, in layout order.
     belts: list[BeltStatsState]
+    inputs: list[InputStatsState]
 
 
 class EventState(TimedMessage):
@@ -156,7 +173,10 @@ class SnapshotMessage(TimedMessage):
 
     type: Literal["snapshot"] = "snapshot"
     running: bool
-    # One entry per belt, in layout order.
+    # Simulated seconds per real second: 1, 2 or 5.
+    speed: int = Field(ge=1)
+    # One entry per input and per belt, in layout order.
+    inputs: list[InputState]
     belts: list[BeltState]
     baggage: list[BaggageState]
     stats: StatsState
@@ -189,12 +209,16 @@ def layout_message(engine: Engine) -> LayoutMessage:
     )
 
 
-def snapshot_message(engine: Engine, *, running: bool, after_event_id: int = 0) -> SnapshotMessage:
+def snapshot_message(engine: Engine, *, running: bool, speed: int = 1,
+                     after_event_id: int = 0) -> SnapshotMessage:
     """Builds the snapshot; events are those with an id greater than after_event_id."""
     return SnapshotMessage(
         tick=engine.tick,
         time_s=engine.time_s,
         running=running,
+        speed=speed,
+        inputs=[InputState(id=input_id, arrival_rate_bags_s=rate)
+                for input_id, rate in engine.arrival_rates.items()],
         belts=[BeltState(id=belt_id, stopped=conveyor.stopped)
                for belt_id, conveyor in engine.conveyors.items()],
         baggage=[BaggageState.model_validate(baggage, from_attributes=True)
@@ -220,7 +244,52 @@ class PauseCommand(Message):
     type: Literal["pause"]
 
 
-Command = Annotated[StartCommand | PauseCommand, Field(discriminator="type")]
+class ResetCommand(Message):
+    """Restores the initial plant, rates and seed, paused at tick 0."""
+
+    type: Literal["reset"]
+
+
+# Simulation speeds offered to the operator: simulated seconds per real second.
+SPEEDS = (1, 2, 5)
+# Highest arrival rate an operator can set on one input, in bags per second.
+MAX_RATE_BAGS_S = 1.0
+
+
+class SetSpeedCommand(Message):
+    """Runs more steps per real second; the step itself stays 50 ms."""
+
+    type: Literal["set_speed"]
+    speed: Literal[SPEEDS]
+
+
+class SetRateCommand(Message):
+    """Changes the arrival rate of one input."""
+
+    type: Literal["set_rate"]
+    input_id: str = Field(min_length=1)
+    rate_bags_s: float = Field(ge=0, le=MAX_RATE_BAGS_S)
+
+
+class StopBeltCommand(Message):
+    """The operator's local stop of one belt."""
+
+    type: Literal["stop_belt"]
+    belt_id: str = Field(min_length=1)
+
+
+class RestartBeltCommand(Message):
+    """Restarts a belt stopped by the operator."""
+
+    type: Literal["restart_belt"]
+    belt_id: str = Field(min_length=1)
+
+
+Command = Annotated[
+    StartCommand | PauseCommand | ResetCommand | SetSpeedCommand | SetRateCommand
+    | StopBeltCommand | RestartBeltCommand,
+    Field(discriminator="type"),
+]
 _command_adapter: TypeAdapter[Command] = TypeAdapter(Command)
 
 

@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 
 from bflow.core.engine import Engine
+from bflow.core.layout import minimal_layout
 from bflow.core.models import Baggage
 from tests.layouts import compact_layout
 
@@ -126,3 +127,54 @@ def test_the_full_plant_conserves_bags_and_spacing_every_tick():
                 assert 0 <= bag.position_m <= conveyor.config.length_m - bag.length_m + 1e-12
             for rear, front in zip(bags, bags[1:]):
                 assert rear.position_m + rear.length_m + gap <= front.position_m + 1e-12
+
+
+def test_a_new_rate_counts_arrivals_from_the_change():
+    # 0.5 bags/s: one arrival every 40 ticks, at ticks 40, 80, ... 960.
+    engine = Engine(minimal_layout(arrival_rate_bags_s=0.5))
+    for _ in range(1000):
+        engine.step()
+    assert engine.generated_count == 25
+    engine.set_arrival_rate("input-a", 2)
+    # 2 bags/s from tick 1000: the next arrival a full interval (10 ticks) later.
+    arrivals = []
+    for _ in range(40):
+        engine.step()
+        if engine.generated_count > 25 + len(arrivals):
+            arrivals.append(engine.tick)
+    assert arrivals == [1010, 1020, 1030, 1040]
+    assert engine.arrival_rates == {"input-a": 2}
+
+
+def test_a_zero_rate_stops_arrivals_and_keeps_the_waiting_bags():
+    # 30 bags/s against about 10 admitted per second: a queue builds up.
+    engine = Engine(minimal_layout(length_m=0.6, arrival_rate_bags_s=30))
+    for _ in range(100):
+        engine.step()
+    waiting = engine.waiting_count
+    assert waiting > 0
+    engine.set_arrival_rate("input-a", 0)
+    for _ in range(20):
+        engine.step()
+    assert engine.generated_count == 150
+    assert 0 < engine.waiting_count < waiting
+
+
+def test_a_rate_change_records_one_event_and_repeats_do_nothing():
+    engine = Engine(minimal_layout(arrival_rate_bags_s=0.5))
+    engine.set_arrival_rate("input-a", 0.5)
+    assert list(engine.events.since(0)) == []
+    engine.step()
+    engine.set_arrival_rate("input-a", 0.25)
+    engine.set_arrival_rate("input-a", 0.25)
+    [event] = list(engine.events.since(0))
+    assert (event.kind, event.element_id, event.tick) == ("input_rate_changed", "input-a", 1)
+
+
+@pytest.mark.parametrize("input_id, rate", [("input-x", 1), ("input-a", -1),
+                                            ("input-a", float("nan"))])
+def test_an_invalid_rate_command_is_rejected(input_id, rate):
+    engine = Engine(minimal_layout())
+    with pytest.raises(ValueError):
+        engine.set_arrival_rate(input_id, rate)
+    assert engine.arrival_rates == {"input-a": 0.5}

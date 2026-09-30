@@ -23,12 +23,17 @@ function snapshot({ stopped = false, bags = 3 } = {}) {
     tick: 400,
     time_s: 20,
     running: true,
+    speed: 1,
+    inputs: [{ id: 'input-a', arrival_rate_bags_s: 0.15 }],
     belts: [{ id: 'line', stopped }],
     baggage: [{
       id: 'bag-7', destination_id: 'output-1', conveyor_id: 'line', position_m: 3.25,
       length_m: 0.6, entered_at_s: 12.5,
     }],
-    stats: { belts: [{ belt_id: 'line', bags, capacity: 6, occupancy: bags / 6 }] },
+    stats: {
+      belts: [{ belt_id: 'line', bags, capacity: 6, occupancy: bags / 6 }],
+      inputs: [{ input_id: 'input-a', waiting: 4 }],
+    },
   };
 }
 
@@ -48,12 +53,14 @@ test('a belt shows its state, occupancy and connections from the snapshot', () =
   });
   assert.equal(content.occupancy, 0.5);
   assert.equal(content.stopped, false);
+  assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: false });
 });
 
 test('a stopped belt says so', () => {
   const content = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ stopped: true }));
   assert.equal(values(content).State, 'Stopped by the operator');
   assert.equal(content.stopped, true);
+  assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: true });
 });
 
 test('before the first snapshot a belt shows its layout only', () => {
@@ -61,6 +68,8 @@ test('before the first snapshot a belt shows its layout only', () => {
   assert.equal(values(content).State, '—');
   assert.equal(values(content).Length, '5.0 m');
   assert.equal(content.occupancy, null);
+  // No command until the engine's state is known.
+  assert.equal(content.action, null);
 });
 
 test('a bag shows its destination, place and travel time so far', () => {
@@ -77,4 +86,18 @@ test('a bag shows its destination, place and travel time so far', () => {
 test('a bag that has left the plant says so', () => {
   const content = panelContent({ kind: 'bag', id: 'bag-99' }, LAYOUT, snapshot());
   assert.deepEqual(values(content), { State: 'No longer in the plant' });
+});
+
+test('a check-in desk shows its queue and rate, and offers to change the rate', () => {
+  const content = panelContent({ kind: 'input', id: 'input-a' }, LAYOUT, snapshot());
+  assert.equal(content.title, 'Check-in A1');
+  assert.deepEqual(values(content), {
+    Waiting: '4', 'Arrival rate': '0.15 bags/s · 9 per min', 'Feeds belt': 'line',
+  });
+  assert.deepEqual(content.action, { kind: 'rate', inputId: 'input-a', rate: 0.15 });
+});
+
+test('a bag offers no command', () => {
+  const content = panelContent({ kind: 'bag', id: 'bag-7' }, LAYOUT, snapshot());
+  assert.equal(content.action, undefined);
 });

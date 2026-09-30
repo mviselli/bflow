@@ -1,13 +1,23 @@
-// Side panel: details of the selected belt or bag.
+// Side panel: details of the selected belt, check-in desk or bag, and the
+// operator's commands for it (stop or restart a belt, a desk's arrival rate).
 //
 // panelContent() is pure (tested with node --test): from the selection, the
-// layout and the newest snapshot it builds a title and a list of rows. Every
-// value is the engine's, as the snapshot reports it; the page only formats
-// it. The one subtraction is a bag's travel time so far, the snapshot's time
-// minus the bag's admission time. Like the counters, the panel shows the
-// newest snapshot, a fraction of a second ahead of the picture.
+// layout and the newest snapshot it builds a title, a list of rows and the
+// action available. Every value is the engine's, as the snapshot reports it;
+// the page only formats it. The one subtraction is a bag's travel time so
+// far, the snapshot's time minus the bag's admission time. Like the
+// counters, the panel shows the newest snapshot, a fraction of a second ahead
+// of the picture.
 
 import { formatTime } from './controls.js';
+
+// Highest rate the slider offers, as the server accepts (MAX_RATE_BAGS_S).
+export const MAX_RATE_BAGS_S = 1;
+const RATE_STEP_BAGS_S = 0.05;
+
+export function formatRate(rate) {
+  return `${rate.toFixed(2)} bags/s · ${Math.round(rate * 60)} per min`;
+}
 
 function metres(value) {
   return `${value.toFixed(1)} m`;
@@ -41,6 +51,24 @@ function beltContent(id, layout, snapshot) {
     rows,
     occupancy: stats ? stats.occupancy : null,
     stopped: state?.stopped ?? false,
+    action: state ? { kind: 'belt', beltId: id, stopped: state.stopped } : null,
+  };
+}
+
+function inputContent(id, layout, snapshot) {
+  const input = layout.inputs.find((node) => node.id === id);
+  if (!input) return null;
+  const rate = snapshot?.inputs.find((node) => node.id === id)?.arrival_rate_bags_s;
+  const waiting = snapshot?.stats.inputs.find((node) => node.input_id === id)?.waiting;
+  const belt = layout.belts.find((item) => item.source_id === id);
+  return {
+    title: `Check-in ${input.label}`,
+    rows: [
+      { label: 'Waiting', value: waiting === undefined ? '—' : String(waiting) },
+      { label: 'Arrival rate', value: rate === undefined ? '—' : formatRate(rate) },
+      { label: 'Feeds belt', value: belt ? belt.id : '—' },
+    ],
+    action: rate === undefined ? null : { kind: 'rate', inputId: id, rate },
   };
 }
 
@@ -72,21 +100,102 @@ function bagContent(id, layout, snapshot, destinations) {
 export function panelContent(selection, layout, snapshot, destinations = new Map()) {
   if (!selection || !layout) return null;
   if (selection.kind === 'belt') return beltContent(selection.id, layout, snapshot);
+  if (selection.kind === 'input') return inputContent(selection.id, layout, snapshot);
   return bagContent(selection.id, layout, snapshot, destinations);
 }
 
-// Draws the content into the panel element.
-export function createPanel(element) {
+// The Stop/Restart button of a belt.
+function beltAction(onCommand) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  let current = null;
+  button.addEventListener('click', () => onCommand({
+    type: current.stopped ? 'restart_belt' : 'stop_belt', belt_id: current.beltId,
+  }));
+  return {
+    element: button,
+    update(action) {
+      current = action;
+      button.textContent = action.stopped ? 'Restart belt' : 'Stop belt';
+      button.className = action.stopped ? '' : 'warning';
+    },
+  };
+}
+
+// The arrival-rate slider of a desk: sends the new rate when released, and
+// follows the engine's rate otherwise.
+function rateAction(onCommand) {
+  const label = document.createElement('label');
+  label.className = 'rate';
+  const caption = document.createElement('span');
+  caption.textContent = 'Set the arrival rate';
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = String(MAX_RATE_BAGS_S);
+  slider.step = String(RATE_STEP_BAGS_S);
+  const value = document.createElement('output');
+  label.append(caption, slider, value);
+  let current = null;
+  let dragging = false;
+  slider.addEventListener('pointerdown', () => { dragging = true; });
+  slider.addEventListener('pointerup', () => { dragging = false; });
+  slider.addEventListener('input', () => { value.textContent = formatRate(Number(slider.value)); });
+  slider.addEventListener('change', () => {
+    dragging = false;
+    onCommand({ type: 'set_rate', input_id: current.inputId, rate_bags_s: Number(slider.value) });
+  });
+  return {
+    element: label,
+    update(action) {
+      current = action;
+      if (dragging) return;
+      slider.value = String(action.rate);
+      value.textContent = formatRate(action.rate);
+    },
+  };
+}
+
+// Draws the content into the panel element. The action control is kept
+// while the same element stays selected, so a slider being dragged or a
+// focused button is not rebuilt at every snapshot.
+export function createPanel(element, { onCommand = () => {} } = {}) {
   const title = element.querySelector('#panel-title');
   const body = element.querySelector('#panel-body');
+  const actions = element.querySelector('#panel-actions');
+  let action = null;      // { key, control }
+  let connected = false;
+
+  function showAction(content) {
+    const next = content?.action;
+    const key = next && `${next.kind}:${next.beltId ?? next.inputId}`;
+    if (action?.key !== key) {
+      actions.replaceChildren();
+      action = null;
+      if (next) {
+        const control = next.kind === 'belt' ? beltAction(onCommand) : rateAction(onCommand);
+        actions.append(control.element);
+        action = { key, control };
+      }
+    }
+    if (action) {
+      action.control.update(next);
+      for (const input of actions.querySelectorAll('button, input')) input.disabled = !connected;
+    }
+  }
 
   return {
+    setConnected(value) {
+      connected = value;
+      for (const input of actions.querySelectorAll('button, input')) input.disabled = !connected;
+    },
     show(content) {
+      showAction(content);
       body.replaceChildren();
       if (!content) {
         title.textContent = 'Details';
         const hint = document.createElement('p');
-        hint.textContent = 'Select a bag or a belt on the map to see its details here.';
+        hint.textContent = 'Select a bag, a belt or a check-in desk on the map to see its details here.';
         body.append(hint);
         return;
       }

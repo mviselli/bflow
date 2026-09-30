@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  DISPLAY_DELAY_S, MAX_DRIFT_S, beltOffset, createPlayback, interpolateBaggage, isNextBelt,
+  DISPLAY_DELAY_S, MAX_DRIFT_S, advanceSurface, createPlayback, interpolateBaggage, isNextBelt,
 } from '../src/playback.js';
 
 const STEP_S = 0.05;
@@ -111,10 +111,12 @@ test('bags that enter or leave between two snapshots fade in place', () => {
 });
 
 test('the belt surface offset follows speed × time and repeats every slat', () => {
-  assert.equal(beltOffset(1, 0, 0.125), 0);
-  assert.ok(Math.abs(beltOffset(1, 0.1, 0.125) - 0.1) < 1e-12);
-  assert.ok(Math.abs(beltOffset(1, 0.2, 0.125) - 0.075) < 1e-12);
-  assert.ok(Math.abs(beltOffset(0.5, 1000.05, 0.125) - 0.025) < 1e-9);
+  assert.equal(advanceSurface(0, 1, 0, 0.125), 0);
+  assert.ok(Math.abs(advanceSurface(0, 1, 0.1, 0.125) - 0.1) < 1e-12);
+  assert.ok(Math.abs(advanceSurface(0.1, 1, 0.1, 0.125) - 0.075) < 1e-12);
+  assert.ok(Math.abs(advanceSurface(0, 0.5, 1000.05, 0.125) - 0.025) < 1e-9);
+  // A stopped belt passes speed 0: its surface stays where it is.
+  assert.equal(advanceSurface(0.05, 0, 3, 0.125), 0.05);
 });
 
 // A corner and a sorter, as in the plant: across → (corner) → down → sorter
@@ -204,4 +206,25 @@ test('a bag joining from the side slides past the belt end to the centre of the 
   assert.equal(at(0.75).conveyor_id, 'line');
   assert.ok(Math.abs(at(0.75).position_m - -0.275) < 1e-9);
   assert.ok(Math.abs(at(1).position_m) < 1e-9);
+});
+
+test('at 5× the clock runs five simulated seconds per real second, a delay behind', () => {
+  const playback = createPlayback();
+  // A snapshot every 1/12 real second, 5/12 simulated seconds apart.
+  const times = [];
+  let now = 0;
+  for (let i = 0; i < 72; i += 1) {
+    const time_s = i * 5 / 12;
+    playback.add({ tick: Math.round(time_s / STEP_S), time_s, running: true, speed: 5, baggage: [] }, now);
+    for (let frame = 0; frame < 5; frame += 1) {
+      times.push(playback.advance(now));
+      now += 1 / 60;
+    }
+  }
+  const last = times.length - 1;
+  const speed = (times[last] - times[last - 60]) / 1.0;
+  assert.ok(Math.abs(speed - 5) < 0.1, `speed ${speed}`);
+  // It settles about DISPLAY_DELAY_S real seconds (0.75 simulated) behind the server.
+  const serverNow = 71 * 5 / 12 + 4 * 5 / 60;
+  assert.ok(Math.abs(serverNow - DISPLAY_DELAY_S * 5 - times[last]) < 0.1);
 });

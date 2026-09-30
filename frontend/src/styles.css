@@ -33,6 +33,13 @@ canvas { display: block; touch-action: none; }
 #panel dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
 #panel dt { color: #aebfce; }
 #panel dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#panel { display: flex; flex-direction: column; }
+#panel-actions { margin-top: auto; padding-top: 16px; }
+#panel-actions button { width: 100%; }
+#panel .rate { display: grid; gap: 6px; }
+#panel .rate span { color: #aebfce; }
+#panel .rate input { width: 100%; accent-color: #75d7c0; }
+#panel .rate output { text-align: right; font-variant-numeric: tabular-nums; }
 #panel .occupancy { height: 8px; margin-top: 12px; border-radius: 4px; background: #304354; overflow: hidden; }
 #panel .occupancy span { display: block; height: 100%; background: #75d7c0; }
 #panel[data-stopped="true"] dd:first-of-type { color: #f0a36b; }
@@ -54,6 +61,17 @@ button {
   font: inherit; font-weight: 600; color: #0e1923; background: #75d7c0; cursor: pointer;
 }
 button:disabled { background: #304354; color: #7d91a2; cursor: not-allowed; }
+button.secondary { color: #e8eef3; background: transparent; border: 1px solid #304354; }
+button.warning { background: #f0a36b; }
+.speeds { display: flex; }
+.speeds button {
+  min-width: 44px; padding: 8px 10px; border-radius: 0; color: #e8eef3;
+  background: transparent; border: 1px solid #304354;
+}
+.speeds button:first-child { border-radius: 6px 0 0 6px; }
+.speeds button:last-child { border-radius: 0 6px 6px 0; }
+.speeds button[aria-pressed="true"] { color: #0e1923; background: #75d7c0; border-color: #75d7c0; }
+.speeds button:disabled { color: #7d91a2; background: transparent; }
 #counters {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 12px; margin: 16px 0 0;

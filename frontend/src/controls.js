@@ -1,4 +1,5 @@
-// Top bar: start/pause button, connection state, simulated time and counters.
+// Top bar: start/pause, reset and speed buttons, connection state,
+// simulated time and counters.
 //
 // The counters are the engine's, copied from the snapshot as they are: the
 // page never computes its own version of the statistics.
@@ -20,6 +21,8 @@ export function formatTime(seconds) {
 
 export function createControls({ onCommand }) {
   const button = document.querySelector('#toggle');
+  const reset = document.querySelector('#reset');
+  const speeds = [...document.querySelectorAll('.speeds button')];
   const connection = document.querySelector('#connection');
   const time = document.querySelector('#time');
   const counters = document.querySelector('#counters');
@@ -38,10 +41,14 @@ export function createControls({ onCommand }) {
 
   let running = false;
   button.addEventListener('click', () => onCommand({ type: running ? 'pause' : 'start' }));
+  reset.addEventListener('click', () => onCommand({ type: 'reset' }));
+  for (const speed of speeds) {
+    speed.addEventListener('click', () => onCommand({ type: 'set_speed', speed: Number(speed.dataset.speed) }));
+  }
 
   return {
     setConnected(connected) {
-      button.disabled = !connected;
+      for (const control of [button, reset, ...speeds]) control.disabled = !connected;
       connection.textContent = connected ? 'Connected' : 'Disconnected · retrying…';
       connection.dataset.state = connected ? 'connected' : 'disconnected';
     },
@@ -49,6 +56,9 @@ export function createControls({ onCommand }) {
       running = snapshot.running;
       button.textContent = running ? 'Pause' : snapshot.tick === 0 ? 'Start' : 'Resume';
       time.textContent = `${formatTime(snapshot.time_s)} · tick ${snapshot.tick}`;
+      for (const speed of speeds) {
+        speed.setAttribute('aria-pressed', String(Number(speed.dataset.speed) === snapshot.speed));
+      }
       for (const [key] of COUNTERS) values[key].textContent = snapshot.stats[key];
       const mean = snapshot.stats.mean_travel_time_s;
       values.mean_travel_time_s.textContent = mean === null ? '—' : `${mean.toFixed(2)} s`;

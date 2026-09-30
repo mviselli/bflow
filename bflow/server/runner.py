@@ -4,6 +4,8 @@ A single Runner owns the Engine. Nobody else calls step() or changes the
 engine: web handlers only put commands in the queue. At every update the
 runner first applies all pending commands, then runs the ticks that real
 time says are due, in a limited group, and returns control to the server.
+The speed multiplies the ticks due per real second; reset replaces the
+engine with a new one built from the same layout and seed.
 """
 
 import asyncio
@@ -12,17 +14,21 @@ from collections.abc import Callable
 
 from bflow.core.engine import STEP_MS, Engine
 from bflow.core.layout import default_layout
-from bflow.server.protocol import Command, PauseCommand, StartCommand
+from bflow.server.protocol import (
+    Command, PauseCommand, ResetCommand, RestartBeltCommand, SetRateCommand, SetSpeedCommand,
+    StartCommand, StopBeltCommand,
+)
 
 
 # Real seconds between two updates of the loop.
 UPDATE_INTERVAL_S = 0.02
-# At most 1 simulated second per update, so that commands stay responsive.
+# At most 1 simulated second per update, so that commands stay responsive
+# (at 5× an update normally runs about 2 ticks).
 MAX_TICKS_PER_UPDATE = 20
 
 
 class Runner:
-    """Advances the engine at 1× real time while running.
+    """Advances the engine at 1×, 2× or 5× real time while running.
 
     The clock is a function returning real seconds (time.monotonic by
     default): tests pass a fake clock and call update() directly, without
@@ -36,13 +42,26 @@ class Runner:
         self.clock = clock
         self.commands: asyncio.Queue[Command] = asyncio.Queue()
         self.running = False
+        self.speed = 1
         # Real time and tick at which the current run started: the ticks due
         # are counted from here, without accumulating real time deltas.
         self._started_at = 0.0
         self._started_tick = 0
 
     def submit(self, command: Command) -> None:
-        """Queues a validated command; it is applied at the start of the next update."""
+        """Queues a validated command; it is applied at the start of the next update.
+
+        Raises ValueError for a belt or input that is not in the plant, so
+        the sender can be told at once. The layout never changes, not even
+        on reset, so the check stays valid until the command is applied.
+        """
+        layout = self.engine.layout
+        if isinstance(command, (StopBeltCommand, RestartBeltCommand)):
+            if command.belt_id not in {belt.id for belt in layout.belts}:
+                raise ValueError(f"Unknown belt: {command.belt_id}")
+        elif isinstance(command, SetRateCommand):
+            if command.input_id not in {node.id for node in layout.inputs}:
+                raise ValueError(f"Unknown input: {command.input_id}")
         self.commands.put_nowait(command)
 
     def update(self) -> int:
@@ -60,7 +79,7 @@ class Runner:
             return 0
         # Whole milliseconds: 100.1 - 100.0 gives 0.0999..., which must not lose a tick.
         elapsed_ms = round((now - self._started_at) * 1000)
-        due = self._started_tick + elapsed_ms // STEP_MS
+        due = self._started_tick + elapsed_ms * self.speed // STEP_MS
         count = min(due - self.engine.tick, MAX_TICKS_PER_UPDATE)
         for _ in range(count):
             self.engine.step()
@@ -77,14 +96,28 @@ class Runner:
     def _apply(self, command: Command, now: float) -> None:
         """Start also resumes after a pause; repeated commands change nothing.
 
-        Resuming restarts the real-time reference, so the real time spent
-        paused is never simulated afterwards.
+        Resuming and changing speed restart the real-time reference, so the
+        real time spent paused is never simulated afterwards and a new speed
+        applies only from now. Reset keeps the speed and leaves the new
+        engine paused at tick 0.
         """
         if isinstance(command, StartCommand) and not self.running:
             self.running = True
             self._restart_clock(now)
         elif isinstance(command, PauseCommand):
             self.running = False
+        elif isinstance(command, ResetCommand):
+            self.engine = Engine(self.engine.layout, seed=self.engine.seed)
+            self.running = False
+        elif isinstance(command, SetSpeedCommand) and command.speed != self.speed:
+            self.speed = command.speed
+            self._restart_clock(now)
+        elif isinstance(command, StopBeltCommand):
+            self.engine.stop_belt(command.belt_id)
+        elif isinstance(command, RestartBeltCommand):
+            self.engine.restart_belt(command.belt_id)
+        elif isinstance(command, SetRateCommand):
+            self.engine.set_arrival_rate(command.input_id, command.rate_bags_s)
 
     def _restart_clock(self, now: float) -> None:
         self._started_at = now

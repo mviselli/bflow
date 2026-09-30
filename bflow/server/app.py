@@ -57,6 +57,7 @@ def create_app(runner: Runner | None = None) -> FastAPI:
             "tick": runner.engine.tick,
             "time_s": runner.engine.time_s,
             "running": runner.running,
+            "speed": runner.speed,
         }
 
     @app.websocket("/ws")
@@ -78,9 +79,14 @@ def create_app(runner: Runner | None = None) -> FastAPI:
 
 
 async def _send_snapshots(websocket: WebSocket, runner: Runner) -> None:
+    engine = runner.engine
     last_event_id = 0
     while True:
-        snapshot = snapshot_message(runner.engine, running=runner.running,
+        # After a reset the new engine numbers its events from 1 again.
+        if runner.engine is not engine:
+            engine = runner.engine
+            last_event_id = 0
+        snapshot = snapshot_message(engine, running=runner.running, speed=runner.speed,
                                     after_event_id=last_event_id)
         await websocket.send_text(snapshot.model_dump_json())
         if snapshot.events:
@@ -97,11 +103,11 @@ async def _receive_commands(websocket: WebSocket, runner: Runner) -> None:
         # Text or binary frame: parse_command accepts both.
         raw = frame.get("text") or frame.get("bytes") or ""
         try:
-            command = parse_command(raw)
+            runner.submit(parse_command(raw))
         except ValidationError as error:
             await websocket.send_text(ErrorMessage(message=_describe(error)).model_dump_json())
-            continue
-        runner.submit(command)
+        except ValueError as error:  # a belt or input that is not in the plant
+            await websocket.send_text(ErrorMessage(message=f"Invalid command: {error}").model_dump_json())
 
 
 def _describe(error: ValidationError) -> str:

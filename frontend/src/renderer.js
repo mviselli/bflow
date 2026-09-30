@@ -14,19 +14,21 @@
 // Zoom and panning move a camera (geometry.js). All layers sit in one
 // `world` container: while the view changes the container is scaled and
 // moved at once, and when it has been still for REBUILD_DELAY_MS the
-// textures are redrawn sharp for the new view. Clicking a bag or a belt
-// selects it: an outline follows it and onSelect reports it.
+// textures are redrawn sharp for the new view. Clicking a bag, a check-in
+// desk or a belt selects it: an outline follows it and onSelect reports it.
+// A belt stopped by the operator keeps its surface still.
 
 import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import {
   BELT, beltSurfaceCanvas, floorCanvas, frameCanvas, suitcaseCanvas, surfaceSpan, toTexture,
 } from './assets.js';
 import {
-  BAGGAGE_WIDTH_M, BELT_WIDTH_M, FIT_CAMERA, baggagePlacement, beltAngle, beltEnds, clampCamera, panBy,
+  BAGGAGE_WIDTH_M, BELT_WIDTH_M, DESK_SPAN, FIT_CAMERA, baggagePlacement, beltAngle, beltEnds,
+  clampCamera, panBy,
   pickAt, plantGeometry, pointAlong, zoomAround,
 } from './geometry.js';
 import { destinationLooks, hashString, shortCode, suitcaseLook } from './looks.js';
-import { beltOffset, createPlayback } from './playback.js';
+import { advanceSurface, createPlayback } from './playback.js';
 
 // Real time in seconds, for the display clock.
 function nowSeconds() {
@@ -74,7 +76,12 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   let camera = FIT_CAMERA;        // the view to show
   let rebuildTimer = null;
   let drawnBags = [];             // bags of the last frame, as drawn
-  let selection = null;           // { kind: 'bag' | 'belt', id } or null
+  let desks = [];                 // { id, belt } for each input and the belt it feeds
+  let selection = null;           // { kind: 'bag' | 'input' | 'belt', id } or null
+  let stoppedBelts = new Set();   // belts stopped by the operator, from the newest snapshot
+  let newestTick = null;
+  const surfaceOffsets = new Map(); // belt id → offset of its surface in metres
+  let surfaceTime = null;         // simulated time the surfaces were last moved to
   let resolution = 1;
   let sceneTextures = [];
   const surfaces = new Map();     // belt id → TilingSprite of its moving surface
@@ -154,12 +161,23 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     return bagTextures.get(key);
   }
 
-  // Scrolls each rubber surface by the distance its belt has travelled.
+  // Scrolls each rubber surface by the distance its belt has run since the
+  // last frame: nothing while simulated time stands still or the belt is
+  // stopped. Time going back (a reset) starts every surface again from 0.
   function moveSurfaces(timeS) {
+    let dtS = surfaceTime === null ? 0 : timeS - surfaceTime;
+    if (dtS < 0) {
+      surfaceOffsets.clear();
+      dtS = 0;
+    }
+    surfaceTime = timeS;
     for (const belt of layout.belts) {
       const surface = surfaces.get(belt.id);
       const tileWidthM = surface.texture.width / resolution / geometry.pixelsPerMetre;
-      surface.tilePosition.x = geometry.toPixels(beltOffset(belt.speed_m_s, timeS, tileWidthM));
+      const speed = stoppedBelts.has(belt.id) ? 0 : belt.speed_m_s;
+      const offset = advanceSurface(surfaceOffsets.get(belt.id) ?? 0, speed, dtS, tileWidthM);
+      surfaceOffsets.set(belt.id, offset);
+      surface.tilePosition.x = geometry.toPixels(offset);
     }
   }
 
@@ -211,6 +229,11 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       if (belt) outlineAlong(highlight, geometry, belt, 0, belt.length_m, BELT_WIDTH_M + 0.1);
       return;
     }
+    if (selection.kind === 'input') {
+      const desk = desks.find((item) => item.id === selection.id);
+      if (desk) outlineAlong(highlight, geometry, desk.belt, DESK_SPAN.fromM, DESK_SPAN.toM, DESK_SPAN.widthM);
+      return;
+    }
     const baggage = drawnBags.find((bag) => bag.id === selection.id);
     const belt = baggage && belts.get(baggage.conveyor_id);
     if (!belt) {
@@ -259,7 +282,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   function pickScreen(point) {
     const { width, height } = app.screen;
     const view = plantGeometry(layout, width, height, camera);
-    return pickAt(view.toMap(point), drawnBags, belts, PICK_TOLERANCE_PX / view.pixelsPerMetre);
+    return pickAt(view.toMap(point), drawnBags, belts, PICK_TOLERANCE_PX / view.pixelsPerMetre, desks);
   }
 
   // Mouse wheel zooms around the pointer; dragging pans; a click selects.
@@ -320,7 +343,13 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       layout = newLayout;
       belts = new Map(layout.belts.map((belt) => [belt.id, belt]));
       destinations = destinationLooks(layout.outputs);
+      desks = layout.inputs.map((input) => ({
+        id: input.id, belt: layout.belts.find((belt) => belt.source_id === input.id),
+      }));
       playback.reset();
+      surfaceOffsets.clear();
+      surfaceTime = null;
+      newestTick = null;
       camera = FIT_CAMERA;
       geometry = null;
       drawnBags = [];
@@ -332,6 +361,11 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     fit: () => layout && setCamera(FIT_CAMERA),
     clearSelection: () => select(null),
     setSnapshot(snapshot) {
+      // Time going back means a reset: bag ids start again from bag-1, so a
+      // selected bag would become another one.
+      if (newestTick !== null && snapshot.tick < newestTick && selection?.kind === 'bag') select(null);
+      newestTick = snapshot.tick;
+      stoppedBelts = new Set(snapshot.belts.filter((belt) => belt.stopped).map((belt) => belt.id));
       playback.add(snapshot, nowSeconds());
     },
   };

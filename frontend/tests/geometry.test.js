@@ -256,6 +256,16 @@ test('picking finds a bag first, then the belt under the point', () => {
   assert.deepEqual(pickAt(point(8.3, 3.9), [], belts), { kind: 'belt', id: 'collector' });
 });
 
+test('a check-in desk is picked behind the start of its belt', () => {
+  const belts = new Map(PLANT.belts.map((b) => [b.id, b]));
+  // input-b at (0, 4) feeds feeder-b to the right: its desk lies at x < 0.
+  const desks = [{ id: 'input-b', belt: belts.get('feeder-b') }];
+  assert.deepEqual(pickAt(point(-0.8, 4.5), [], belts, 0, desks), { kind: 'input', id: 'input-b' });
+  assert.equal(pickAt(point(-1.8, 4), [], belts, 0, desks), null);
+  // Just past the belt's start it is the belt.
+  assert.deepEqual(pickAt(point(0.2, 4), [], belts, 0, desks), { kind: 'belt', id: 'feeder-b' });
+});
+
 test('an empty layout is rejected', () => {
   assert.throws(() => plantBounds({ inputs: [], merges: [], sorters: [], outputs: [], belts: [] }));
 });

@@ -15,6 +15,12 @@
         <div class="toolbar">
           <h2 id="map-title">Plant</h2>
           <button id="toggle" type="button" disabled>Start</button>
+          <button id="reset" type="button" class="secondary" disabled>Reset</button>
+          <div class="speeds" role="group" aria-label="Simulation speed">
+            <button type="button" data-speed="1" aria-pressed="true" disabled>1×</button>
+            <button type="button" data-speed="2" aria-pressed="false" disabled>2×</button>
+            <button type="button" data-speed="5" aria-pressed="false" disabled>5×</button>
+          </div>
           <p id="time" aria-live="off">00:00.00 · tick 0</p>
           <p id="connection" data-state="disconnected">Connecting…</p>
         </div>
@@ -27,12 +33,13 @@
               <button id="fit" type="button" aria-label="Show the whole plant">Fit</button>
             </div>
           </div>
-          <aside id="panel" aria-labelledby="panel-title" aria-live="polite">
+          <aside id="panel" aria-labelledby="panel-title">
             <h3 id="panel-title">Details</h3>
             <div id="panel-body"></div>
+            <div id="panel-actions"></div>
           </aside>
         </div>
-        <p id="hint">Scroll to zoom, drag to move the view, click a bag or a belt for its details; Esc clears the selection.</p>
+        <p id="hint">Scroll to zoom, drag to move the view, click a bag, a belt or a check-in desk for its details and commands; Esc clears the selection.</p>
         <dl id="counters" aria-label="Engine counters"></dl>
       </section>
     </main>

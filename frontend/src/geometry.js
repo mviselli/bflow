@@ -12,6 +12,10 @@
 // side ends at its edge.
 export const BELT_WIDTH_M = 1.0;
 export const BAGGAGE_WIDTH_M = 0.45;
+// A check-in desk stands behind the start of its belt: from DESK_SPAN.fromM
+// to DESK_SPAN.toM along the belt (negative: before its start), widthM wide.
+// Used to pick and outline a desk; assets.js draws it inside this area.
+export const DESK_SPAN = { fromM: -1.6, toM: 0, widthM: 2.2 };
 // Floor shown around the plant, in metres: room for the check-in desks, the
 // output chutes and the signs behind the desks.
 export const PLANT_MARGIN_M = 2.5;
@@ -220,12 +224,14 @@ function inBeltFrame(belt, point) {
 }
 
 // What is under a map point: a bag if the point is on one (bags are drawn
-// above the belts), otherwise a belt, otherwise null. `bags` are the bags as
-// drawn (belt and position_m), `belts` maps ids to the layout's belts, and
-// `toleranceM` widens every shape a little so small bags are easy to hit.
-// When shapes overlap (a bag crossing a plate, belts meeting at a joint) the
-// one whose centre line is nearest wins. Returns { kind, id } or null.
-export function pickAt(point, bags, belts, toleranceM = 0) {
+// above the belts), otherwise a check-in desk, otherwise a belt, otherwise
+// null. `bags` are the bags as drawn (belt and position_m), `belts` maps ids
+// to the layout's belts, `desks` lists { id, belt } for each input and the
+// belt it feeds, and `toleranceM` widens every shape a little so small bags
+// are easy to hit. When shapes overlap (a bag crossing a plate, belts
+// meeting at a joint) the one whose centre line is nearest wins. Returns
+// { kind: 'bag' | 'input' | 'belt', id } or null.
+export function pickAt(point, bags, belts, toleranceM = 0, desks = []) {
   let best = null;
   for (const bag of bags) {
     const belt = belts.get(bag.conveyor_id);
@@ -238,6 +244,11 @@ export function pickAt(point, bags, belts, toleranceM = 0) {
     if (hit && (!best || distance < best.distance)) best = { kind: 'bag', id: bag.id, distance };
   }
   if (best) return { kind: best.kind, id: best.id };
+  for (const desk of desks) {
+    const { along, across } = inBeltFrame(desk.belt, point);
+    if (along >= DESK_SPAN.fromM && along <= DESK_SPAN.toM
+      && Math.abs(across) <= DESK_SPAN.widthM / 2) return { kind: 'input', id: desk.id };
+  }
   for (const belt of belts.values()) {
     const { along, across } = inBeltFrame(belt, point);
     const hit = along >= -toleranceM && along <= belt.length_m + toleranceM

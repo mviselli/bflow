@@ -33,11 +33,13 @@ npm --prefix frontend run dev
 ```
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Use **Start**, **Pause**
-and **Resume**; the counters in the top bar come from the engine. Scroll over
+and **Resume**, **Reset** to start again from the beginning, and **1×**, **2×**
+or **5×** to change the speed; the counters come from the engine. Scroll over
 the map to zoom, drag to move the view and use **Fit** to see the whole plant
-again. Click a bag or a belt to see its details in the side panel (a belt's state and
-occupancy, a bag's destination, position and travel time); `Esc` clears the
-selection. Stop
+again. Click a bag, a belt or a check-in desk to see its details in the side panel
+(a belt's state and occupancy, a bag's destination, position and travel time,
+a desk's queue and arrival rate). From the panel you can stop and restart a
+belt, or change how many bags arrive at a desk. `Esc` clears the selection. Stop
 both servers with `Ctrl+C`.
 
 ## Run from the command line

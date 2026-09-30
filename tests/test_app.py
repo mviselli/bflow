@@ -49,9 +49,15 @@ def is_error(message: dict) -> bool:
 
 
 def wait_for_status(client: TestClient, expected: dict) -> None:
-    """Polls until the runner loop has applied commands and ticks (at most 2 s)."""
+    """Polls until the runner loop has applied commands and ticks (at most 2 s).
+
+    Only the keys in expected are compared.
+    """
     deadline = time.monotonic() + 2
-    while (status := client.get("/api/status").json()) != expected:
+    while True:
+        status = client.get("/api/status").json()
+        if {key: status[key] for key in expected} == expected:
+            return
         assert time.monotonic() < deadline, f"status stayed {status}, expected {expected}"
         time.sleep(0.005)
 
@@ -67,7 +73,8 @@ def test_app_starts_stopped_at_tick_zero():
         assert app.state.runner is runner
         clock.now += 5
         settle()
-        assert client.get("/api/status").json() == {"tick": 0, "time_s": 0.0, "running": False}
+        assert client.get("/api/status").json() == {
+            "tick": 0, "time_s": 0.0, "running": False, "speed": 1}
 
 
 def test_start_pause_and_resume_through_the_websocket():
@@ -204,6 +211,35 @@ def test_each_event_is_sent_once_per_connection():
             ws.receive_json()  # layout
             first = ws.receive_json()
             assert [event["id"] for event in first["events"]][:len(received)] == received
+
+
+def test_a_belt_not_in_the_plant_gets_an_error_and_a_real_one_stops():
+    app, runner, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        ws.send_text('{"type": "stop_belt", "belt_id": "belt-x"}')
+        reply = receive_until(ws, is_error)
+        assert reply["message"] == "Invalid command: Unknown belt: belt-x"
+        ws.send_text('{"type": "stop_belt", "belt_id": "line-2"}')
+        stopped = receive_until(ws, lambda m: m["type"] == "snapshot" and any(
+            belt["id"] == "line-2" and belt["stopped"] for belt in m["belts"]))
+        assert stopped["events"][-1]["kind"] == "belt_stopped"
+
+
+def test_after_a_reset_the_new_engine_events_reach_an_open_connection():
+    app, _, clock = make_app(Engine(minimal_layout(arrival_rate_bags_s=5.0)))
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        ws.send_text('{"type": "start"}')
+        receive_until(ws, is_snapshot(0, True))
+        clock.now += 1
+        receive_until(ws, lambda m: m["type"] == "snapshot" and m["events"])
+        ws.send_text('{"type": "reset"}')
+        receive_until(ws, is_snapshot(0, False))
+        ws.send_text('{"type": "start"}')
+        receive_until(ws, is_snapshot(0, True))
+        clock.now += 1
+        # Event ids start again from 1 and the connection still sends them.
+        after = receive_until(ws, lambda m: m["type"] == "snapshot" and m["events"])
+        assert after["events"][0]["id"] == 1
 
 
 def test_snapshots_arrive_at_about_twelve_per_second():

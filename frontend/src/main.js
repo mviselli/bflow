@@ -27,7 +27,10 @@ async function initialize() {
   let destinations = new Map();
   let latest = null;     // the newest snapshot
   let selected = null;
-  const panel = createPanel(document.querySelector('#panel'));
+  let link = null;
+  const panel = createPanel(document.querySelector('#panel'), {
+    onCommand: (command) => link.send(command),
+  });
   const showPanel = () => panel.show(panelContent(selected, layout, latest, destinations));
   showPanel();
   const renderer = createRenderer(app, {
@@ -42,12 +45,12 @@ async function initialize() {
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') renderer.clearSelection();
   });
-  let link = null;
   const controls = createControls({ onCommand: (command) => link.send(command) });
 
   link = connect({
     onConnectionChange(connected) {
       controls.setConnected(connected);
+      panel.setConnected(connected);
       status.textContent = connected ? '' : 'Waiting for the simulation server…';
     },
     onMessage(message) {

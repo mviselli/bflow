@@ -10,6 +10,11 @@ from bflow.core.events import Severity
 from bflow.core.layout import default_layout, minimal_layout
 from bflow.server.protocol import (
     ErrorMessage,
+    ResetCommand,
+    RestartBeltCommand,
+    SetRateCommand,
+    SetSpeedCommand,
+    StopBeltCommand,
     LayoutMessage,
     PauseCommand,
     SnapshotMessage,
@@ -34,6 +39,12 @@ def run(engine: Engine, ticks: int) -> Engine:
     ('{"type": "start"}', StartCommand),
     ('{"type": "pause"}', PauseCommand),
     (b'{"type": "pause"}', PauseCommand),
+    ('{"type": "reset"}', ResetCommand),
+    ('{"type": "set_speed", "speed": 5}', SetSpeedCommand),
+    ('{"type": "set_rate", "input_id": "input-a1", "rate_bags_s": 0.25}', SetRateCommand),
+    ('{"type": "set_rate", "input_id": "input-a1", "rate_bags_s": 0}', SetRateCommand),
+    ('{"type": "stop_belt", "belt_id": "line-2"}', StopBeltCommand),
+    ('{"type": "restart_belt", "belt_id": "line-2"}', RestartBeltCommand),
 ])
 def test_known_commands_are_parsed(raw, expected):
     assert isinstance(parse_command(raw), expected)
@@ -48,6 +59,16 @@ def test_known_commands_are_parsed(raw, expected):
     '[{"type": "start"}]',
     '{"type": "start"',
     '',
+    '{"type": "set_speed", "speed": 3}',
+    '{"type": "set_speed", "speed": "5"}',
+    '{"type": "set_speed"}',
+    '{"type": "set_rate", "input_id": "input-a1", "rate_bags_s": -0.1}',
+    '{"type": "set_rate", "input_id": "input-a1", "rate_bags_s": 1.5}',
+    '{"type": "set_rate", "input_id": "", "rate_bags_s": 0.1}',
+    '{"type": "set_rate", "rate_bags_s": 0.1}',
+    '{"type": "stop_belt"}',
+    '{"type": "stop_belt", "belt_id": "line-2", "now": true}',
+    '{"type": "reset", "seed": 7}',
 ])
 def test_invalid_commands_are_rejected(raw):
     with pytest.raises(ValidationError):
@@ -169,8 +190,11 @@ def test_snapshot_stats_are_the_engine_stats():
     engine = run(Engine(), 600)
     stats = engine.stats()
     sent = snapshot_message(engine, running=True).stats.model_dump()
-    expected = {name: getattr(stats, name) for name in StatsState.model_fields if name != "belts"}
-    assert {name: value for name, value in sent.items() if name != "belts"} == expected
+    lists = {"belts", "inputs"}
+    expected = {name: getattr(stats, name) for name in StatsState.model_fields if name not in lists}
+    assert {name: value for name, value in sent.items() if name not in lists} == expected
+    assert sent["inputs"] == [{"input_id": node.input_id, "waiting": node.waiting}
+                              for node in stats.inputs]
     assert sent["belts"] == [
         {"belt_id": belt.belt_id, "bags": belt.bags, "capacity": belt.capacity,
          "occupancy": belt.occupancy}
@@ -214,3 +238,12 @@ def test_snapshot_round_trips_through_json():
 
 def test_error_message_has_its_type():
     assert ErrorMessage(message="bad").model_dump() == {"type": "error", "message": "bad"}
+
+
+def test_snapshot_has_the_speed_and_every_input_rate():
+    engine = Engine(default_layout())
+    engine.set_arrival_rate("input-b2", 0.4)
+    snapshot = snapshot_message(engine, running=True, speed=5)
+    assert snapshot.speed == 5
+    assert [(node.id, node.arrival_rate_bags_s) for node in snapshot.inputs] == [
+        (node.id, 0.4 if node.id == "input-b2" else 0.15) for node in engine.layout.inputs]
