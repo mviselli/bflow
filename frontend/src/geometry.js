@@ -7,11 +7,14 @@
 // or collisions: it only maps the engine's numbers onto the screen.
 
 // Graphics-only sizes: the engine has no widths, only lengths along the belt.
+// The belt width matches the engine's JUNCTION_SIZE_M: the transfer plate of
+// a merge or sorter is a square as wide as a belt, and a belt joining from the
+// side ends at its edge.
 export const BELT_WIDTH_M = 1.0;
 export const BAGGAGE_WIDTH_M = 0.45;
 // Floor shown around the plant, in metres: room for the check-in desks, the
-// output chutes and the signs.
-export const PLANT_MARGIN_M = 2.2;
+// output chutes and the signs behind the desks.
+export const PLANT_MARGIN_M = 2.5;
 
 // Smallest rectangle holding every node and belt end of the layout.
 export function plantBounds(layout) {
@@ -78,16 +81,47 @@ export function baggagePlacement(geometry, belt, baggage) {
   };
 }
 
+function distance(a, b) {
+  return Math.hypot(b.x_m - a.x_m, b.y_m - a.y_m);
+}
+
+// The centre of the joint where a bag passes from belt `from` to belt `to`:
+// where the two belts' lines cross. A belt joining from the side stops at the
+// edge of the plate, so this can lie a little past its end. Belts in line
+// meet where one ends and the other starts.
+export function jointPoint(from, to) {
+  const d1 = { x: from.end.x_m - from.start.x_m, y: from.end.y_m - from.start.y_m };
+  const d2 = { x: to.end.x_m - to.start.x_m, y: to.end.y_m - to.start.y_m };
+  const cross = d1.x * d2.y - d1.y * d2.x;
+  if (Math.abs(cross) < 1e-9) return from.end;
+  const dx = to.start.x_m - from.start.x_m;
+  const dy = to.start.y_m - from.start.y_m;
+  const along = (dx * d2.y - dy * d2.x) / cross;
+  return { x_m: from.start.x_m + d1.x * along, y_m: from.start.y_m + d1.y * along };
+}
+
 // Whether each end of a belt is free (at an input or an output, drawn with a
 // drum) or at a joint (another belt, a merge or a sorter, drawn as a square
-// transfer plate). Belt id → { startJoint, endJoint }.
+// transfer plate), and how much of the belt the plate covers at each end: half
+// a plate for a belt reaching the joint's centre, nothing for one stopping at
+// its edge. Belt id → { startJoint, endJoint, startTrimM, endTrimM }.
 export function beltEnds(layout) {
   const inputIds = new Set(layout.inputs.map((node) => node.id));
   const outputIds = new Set(layout.outputs.map((node) => node.id));
-  return new Map(layout.belts.map((belt) => [belt.id, {
-    startJoint: !inputIds.has(belt.source_id),
-    endJoint: !outputIds.has(belt.target_id),
-  }]));
+  const centres = new Map([...layout.merges, ...layout.sorters]
+    .map((node) => [node.id, node.position]));
+  // A belt-to-belt corner is centred where the two belts meet.
+  const trim = (point, centre) => Math.max(BELT_WIDTH_M / 2 - distance(point, centre ?? point), 0);
+  return new Map(layout.belts.map((belt) => {
+    const startJoint = !inputIds.has(belt.source_id);
+    const endJoint = !outputIds.has(belt.target_id);
+    return [belt.id, {
+      startJoint,
+      endJoint,
+      startTrimM: startJoint ? trim(belt.start, centres.get(belt.source_id)) : 0,
+      endTrimM: endJoint ? trim(belt.end, centres.get(belt.target_id)) : 0,
+    }];
+  }));
 }
 
 // The points where belts meet: every merge and sorter, and every corner
@@ -95,19 +129,22 @@ export function beltEnds(layout) {
 // in which its belts leave the point, so the drawing can close the others.
 export function plantJoints(layout) {
   const beltIds = new Set(layout.belts.map((belt) => belt.id));
-  const points = [
-    ...[...layout.merges, ...layout.sorters].map((node) => ({ id: node.id, position: node.position })),
-    ...layout.belts.filter((belt) => beltIds.has(belt.target_id))
-      .map((belt) => ({ id: `${belt.id}>${belt.target_id}`, position: belt.end })),
-  ];
-  const same = (a, b) => a.x_m === b.x_m && a.y_m === b.y_m;
-  return points.map(({ id, position }) => ({
-    id,
-    position,
+  const nodes = [...layout.merges, ...layout.sorters].map((node) => ({
+    id: node.id,
+    position: node.position,
     directions: layout.belts.flatMap((belt) => {
-      if (same(belt.start, position)) return [beltAngle(belt)];
-      if (same(belt.end, position)) return [beltAngle(belt) + Math.PI];
+      if (belt.source_id === node.id) return [beltAngle(belt)];
+      if (belt.target_id === node.id) return [beltAngle(belt) + Math.PI];
       return [];
     }),
   }));
+  const corners = layout.belts.filter((belt) => beltIds.has(belt.target_id)).map((belt) => {
+    const next = layout.belts.find((other) => other.id === belt.target_id);
+    return {
+      id: `${belt.id}>${next.id}`,
+      position: belt.end,
+      directions: [beltAngle(next), beltAngle(belt) + Math.PI],
+    };
+  });
+  return [...nodes, ...corners];
 }

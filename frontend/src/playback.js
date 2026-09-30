@@ -12,6 +12,8 @@
 // This module is pure (no DOM, no PixiJS): the caller passes the real time in
 // seconds, which keeps it testable with node --test.
 
+import { jointPoint } from './geometry.js';
+
 // How far the display clock stays behind the newest snapshot: about two
 // snapshot intervals, so a late snapshot does not stop the movement.
 export const DISPLAY_DELAY_S = 0.15;
@@ -124,19 +126,24 @@ export function isNextBelt(from, to, belts) {
 // engine moves it to the end of the old belt, then puts its rear edge at the
 // start of the new one (a jump of about one bag length, an accepted
 // approximation). On screen its centre slides at an even pace along the
-// belts, from its old centre to the point where they meet and on to its new
-// centre: the same two states, with no movement beyond them. The returned
-// position_m keeps the engine's meaning (rear edge along the belt it is
-// drawn on), even where it runs a little past the belt's ends.
-function acrossBelts(old, baggage, from, fraction) {
+// belts, from its old centre to the centre of the joint and on to its new
+// centre: the same two states, with no movement beyond them. A belt joining
+// from the side stops at the edge of the plate, so the bag runs a little past
+// its end before turning. The returned position_m keeps the engine's meaning
+// (rear edge along the belt it is drawn on), even where it runs a little past
+// the belt's ends.
+function acrossBelts(old, baggage, from, to, fraction) {
   const half = baggage.length_m / 2;
-  const toJoint = Math.max(from.length_m - (old.position_m + half), 0);
-  const fromJoint = Math.max(baggage.position_m + half, 0);
+  const joint = jointPoint(from, to);
+  const pastEnd = Math.hypot(joint.x_m - from.end.x_m, joint.y_m - from.end.y_m);
+  const beforeStart = Math.hypot(to.start.x_m - joint.x_m, to.start.y_m - joint.y_m);
+  const toJoint = Math.max(from.length_m + pastEnd - (old.position_m + half), 0);
+  const fromJoint = Math.max(beforeStart + baggage.position_m + half, 0);
   const travelled = (toJoint + fromJoint) * fraction;
   if (travelled < toJoint) {
     return { ...baggage, conveyor_id: from.id, position_m: old.position_m + travelled, alpha: 1 };
   }
-  return { ...baggage, position_m: travelled - toJoint - half, alpha: 1 };
+  return { ...baggage, position_m: travelled - toJoint - beforeStart - half, alpha: 1 };
 }
 
 // Bags between two snapshots, fraction 0 → previous, 1 → next. `belts`
@@ -154,7 +161,7 @@ export function interpolateBaggage(previousBags, nextBags, fraction, belts = new
       const position = old.position_m + (baggage.position_m - old.position_m) * fraction;
       result.push({ ...baggage, position_m: position, alpha: 1 });
     } else if (from && to && isNextBelt(from, to, belts)) {
-      result.push(acrossBelts(old, baggage, from, fraction));
+      result.push(acrossBelts(old, baggage, from, to, fraction));
     } else {
       result.push({ ...baggage, alpha: fraction });  // admitted in between
     }

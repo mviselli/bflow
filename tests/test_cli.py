@@ -12,7 +12,7 @@ def test_default_run_is_the_full_plant_for_600_seconds_and_is_conserved(capsys):
     out = capsys.readouterr().out
     assert "Layout full · seed 42 · 600.00 simulated s (12000 ticks)" in out
     assert "Conservation: OK" in out
-    for element_id in ("input-a", "input-c", "output-1", "output-3", "collector", "branch-3-2"):
+    for element_id in ("input-a1", "input-b3", "output-1", "output-4", "island-b-4", "line-4"):
         assert f"  {element_id} " in out
 
 

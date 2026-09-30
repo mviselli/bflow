@@ -8,6 +8,7 @@ from bflow.core.layout import (
     BeltConfig, InputConfig, LayoutConfig, MergeConfig, OutputConfig, Point,
     SorterConfig, default_layout, minimal_layout,
 )
+from tests.layouts import compact_layout
 
 
 def _positions(layout):
@@ -26,69 +27,91 @@ def _follow(layout, belt_id):
     return path, target
 
 
-def test_default_layout_has_three_inputs_a_merge_a_sorter_and_three_outputs():
+def test_default_layout_has_two_islands_of_three_desks_one_line_and_four_outputs():
     layout = default_layout()
-    assert [node.id for node in layout.inputs] == ["input-a", "input-b", "input-c"]
-    assert [node.id for node in layout.merges] == ["merge"]
-    assert [node.id for node in layout.sorters] == ["sorter"]
-    assert [node.id for node in layout.outputs] == ["output-1", "output-2", "output-3"]
+    assert [node.id for node in layout.inputs] == [
+        "input-a1", "input-a2", "input-a3", "input-b1", "input-b2", "input-b3"]
+    assert [node.label for node in layout.inputs] == ["A1", "A2", "A3", "B1", "B2", "B3"]
+    assert [node.id for node in layout.merges] == [
+        "merge-a2", "merge-a3", "merge-b2", "merge-b3", "merge-main"]
+    assert [node.id for node in layout.sorters] == ["divert-1", "divert-2", "divert-3"]
+    assert [node.id for node in layout.outputs] == ["output-1", "output-2", "output-3", "output-4"]
     ids = [element.id for element in
            layout.inputs + layout.merges + layout.sorters + layout.outputs + layout.belts]
     assert len(ids) == len(set(ids))
 
 
-def test_every_input_reaches_the_merge_and_the_common_line_reaches_the_sorter():
+def test_desks_join_their_island_one_after_the_other_and_the_islands_join_the_line():
     layout = default_layout()
     first_belts = {belt.source_id: belt.id for belt in layout.belts}
-    assert _follow(layout, first_belts["input-a"]) == (["feeder-a-1", "feeder-a-2"], "merge")
-    assert _follow(layout, first_belts["input-b"]) == (["feeder-b"], "merge")
-    assert _follow(layout, first_belts["input-c"]) == (["feeder-c-1", "feeder-c-2"], "merge")
-    assert _follow(layout, first_belts["merge"]) == (["collector"], "sorter")
+    for island in "ab":
+        assert _follow(layout, first_belts[f"input-{island}1"]) == (
+            [f"feeder-{island}1", f"island-{island}-1"], f"merge-{island}2")
+        assert _follow(layout, first_belts[f"input-{island}2"]) == (
+            [f"feeder-{island}2"], f"merge-{island}2")
+        assert _follow(layout, first_belts[f"merge-{island}2"]) == (
+            [f"island-{island}-2"], f"merge-{island}3")
+        assert _follow(layout, first_belts[f"input-{island}3"]) == (
+            [f"feeder-{island}3"], f"merge-{island}3")
+    assert _follow(layout, "island-a-3") == (["island-a-3"], "merge-main")
+    assert _follow(layout, "island-b-3") == (["island-b-3", "island-b-4"], "merge-main")
 
 
-def test_each_sorter_branch_ends_at_a_different_output():
+def test_the_line_passes_three_diverts_each_with_a_branch_to_one_output():
     layout = default_layout()
-    branches = [belt.id for belt in layout.belts if belt.source_id == "sorter"]
-    assert [_follow(layout, belt_id) for belt_id in branches] == [
-        (["branch-1-1", "branch-1-2"], "output-1"),
-        (["branch-2"], "output-2"),
-        (["branch-3-1", "branch-3-2"], "output-3"),
+    assert [_follow(layout, belt.id) for belt in layout.belts
+            if belt.id.startswith("line-")] == [
+        (["line-1"], "divert-1"), (["line-2"], "divert-2"),
+        (["line-3"], "divert-3"), (["line-4"], "output-4"),
     ]
+    for number in "123":
+        assert _follow(layout, f"branch-{number}") == ([f"branch-{number}"], f"output-{number}")
 
 
-def test_connected_ends_meet_on_the_map():
+def test_side_belts_stop_at_the_edge_of_the_junction_and_the_line_crosses_its_centre():
     layout = default_layout()
     positions = _positions(layout)
     belts = {belt.id: belt for belt in layout.belts}
+    junctions = {node.id for node in layout.merges + layout.sorters}
+    side = {"feeder-a2", "feeder-a3", "feeder-b2", "feeder-b3", "island-b-4",
+            "branch-1", "branch-2", "branch-3"}
     for belt in layout.belts:
-        source = belts[belt.source_id].end if belt.source_id in belts else positions[belt.source_id]
-        target = belts[belt.target_id].start if belt.target_id in belts else positions[belt.target_id]
-        assert belt.start == source, belt.id
-        assert belt.end == target, belt.id
+        for node_id, point in ((belt.source_id, belt.start), (belt.target_id, belt.end)):
+            if node_id in junctions:
+                centre = positions[node_id]
+                distance = abs(point.x_m - centre.x_m) + abs(point.y_m - centre.y_m)
+                assert distance == (0.5 if belt.id in side else 0), belt.id
+            elif node_id in belts:
+                assert point in (belts[node_id].start, belts[node_id].end), belt.id
+            else:
+                assert point == positions[node_id], belt.id
 
 
 def test_belt_lengths_are_the_exact_map_distances():
     lengths = {belt.id: belt.length_m for belt in default_layout().belts}
     assert lengths == {
-        "feeder-a-1": 8, "feeder-a-2": 4, "feeder-b": 8, "feeder-c-1": 8, "feeder-c-2": 4,
-        "collector": 12,
-        "branch-1-1": 4, "branch-1-2": 8, "branch-2": 8, "branch-3-1": 4, "branch-3-2": 8,
+        "feeder-a1": 4, "island-a-1": 4, "feeder-a2": 3.5, "island-a-2": 4, "feeder-a3": 3.5,
+        "island-a-3": 6,
+        "feeder-b1": 4, "island-b-1": 4, "feeder-b2": 3.5, "island-b-2": 4, "feeder-b3": 3.5,
+        "island-b-3": 6, "island-b-4": 3.5,
+        "line-1": 6, "branch-1": 4.5, "line-2": 5, "branch-2": 4.5, "line-3": 5,
+        "branch-3": 4.5, "line-4": 5,
     }
     diagonal = BeltConfig("belt", "a", "b", Point(1, 1), Point(4, 5))
     assert diagonal.length_m == 5
 
 
-def test_default_rates_are_below_the_capacity_of_the_common_line():
+def test_default_rates_are_below_the_capacity_of_the_sort_line():
     layout = default_layout()
-    collector = next(belt for belt in layout.belts if belt.id == "collector")
-    capacity = collector.speed_m_s / (layout.baggage_length_m + layout.min_gap_m)
+    line = next(belt for belt in layout.belts if belt.id == "line-1")
+    capacity = line.speed_m_s / (layout.baggage_length_m + layout.min_gap_m)
     demand = sum(node.arrival_rate_bags_s for node in layout.inputs)
-    assert demand == 0.75
+    assert demand == pytest.approx(0.9)
     assert demand < capacity == 1.25
 
 
 def test_layout_is_immutable():
-    layout = default_layout()
+    layout = compact_layout()
     with pytest.raises(FrozenInstanceError):
         layout.min_gap_m = 1
     with pytest.raises(FrozenInstanceError):
@@ -134,10 +157,10 @@ def test_invalid_elements(make):
 
 def test_a_zero_rate_and_no_gap_are_allowed():
     assert InputConfig("input", "A", Point(0, 0), 0).arrival_rate_bags_s == 0
-    assert replace(default_layout(), min_gap_m=0).min_gap_m == 0
+    assert replace(compact_layout(), min_gap_m=0).min_gap_m == 0
 
 
-# Validation of the plant as a whole. Each case changes the default layout
+# Validation of the plant as a whole. Each case changes the compact layout
 # just enough to break one rule.
 
 
@@ -153,7 +176,7 @@ def _add(layout, **elements):
 
 
 def _invalid_layouts():
-    layout = default_layout()
+    layout = compact_layout()
     return [
         ("at least one input", lambda: replace(layout, inputs=())),
         ("at least one input and one output", lambda: replace(layout, outputs=())),
@@ -213,6 +236,30 @@ def test_invalid_layout(message, make):
         make()
 
 
+@pytest.mark.parametrize("belt_id, changes, length", [
+    ("feeder-b", {"end": Point(7.5, 4)}, 7.5),      # stops at the edge of the merge's plate
+    ("feeder-a-2", {"end": Point(8, 3.5)}, 3.5),    # the same, coming from above
+    ("branch-2", {"start": Point(20.5, 4)}, 7.5),   # leaves from the edge of the sorter's plate
+    ("collector", {"start": Point(8.25, 4), "end": Point(19.75, 4)}, 11.5),
+])
+def test_a_belt_may_end_at_the_edge_of_a_junction_pointing_at_its_centre(belt_id, changes, length):
+    layout = _change_belt(compact_layout(), belt_id, **changes)
+    belt = next(belt for belt in layout.belts if belt.id == belt_id)
+    assert belt.length_m == length
+
+
+@pytest.mark.parametrize("belt_id, changes", [
+    ("feeder-b", {"end": Point(7.4, 4)}),          # stops short of the plate
+    ("feeder-b", {"end": Point(8.5, 4)}),          # runs past the centre
+    ("feeder-a-2", {"end": Point(8.2, 3.6)}),      # close enough, but not pointing at the centre
+    ("branch-2", {"start": Point(20.6, 4)}),
+    ("feeder-b", {"start": Point(0.1, 4)}),        # inputs and outputs have no plate
+])
+def test_a_belt_away_from_a_junction_or_askew_is_rejected(belt_id, changes):
+    with pytest.raises(ValueError, match=f"Belt {belt_id} must start where"):
+        _change_belt(compact_layout(), belt_id, **changes)
+
+
 def test_a_single_belt_from_input_to_output_is_a_valid_plant():
     layout = LayoutConfig(
         inputs=(InputConfig("input-a", "A", Point(0, 0), 0.5),),
@@ -224,7 +271,7 @@ def test_a_single_belt_from_input_to_output_is_a_valid_plant():
 
 
 def test_a_bag_as_long_as_the_shortest_belt_fits():
-    assert replace(default_layout(), baggage_length_m=4).baggage_length_m == 4
+    assert replace(compact_layout(), baggage_length_m=4).baggage_length_m == 4
 
 
 def test_minimal_layout_is_one_belt_from_input_to_output():

@@ -6,8 +6,9 @@ import pytest
 
 from bflow.core.engine import Engine
 from bflow.core.events import Severity
-from bflow.core.layout import default_layout, minimal_layout
+from bflow.core.layout import minimal_layout
 from bflow.core.models import Baggage
+from tests.layouts import compact_layout
 
 
 def advance(engine, ticks):
@@ -22,7 +23,7 @@ def place(engine, conveyor_id, name, position):
 
 
 def quiet_plant():
-    layout = default_layout()
+    layout = compact_layout()
     inputs = tuple(replace(node, arrival_rate_bags_s=0) for node in layout.inputs)
     return Engine(replace(layout, inputs=inputs))
 
@@ -87,7 +88,7 @@ def test_a_stopped_branch_holds_up_only_bags_behind_it():
 
 
 def test_stop_and_restart_record_one_info_event_each_and_repeats_are_no_ops():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     advance(engine, 20)
     engine.stop_belt("collector")
     engine.stop_belt("collector")
@@ -107,13 +108,13 @@ def test_stop_and_restart_record_one_info_event_each_and_repeats_are_no_ops():
 
 @pytest.mark.parametrize("command", ["stop_belt", "restart_belt"])
 def test_an_unknown_belt_is_rejected(command):
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     with pytest.raises(ValueError, match="Unknown belt"):
         getattr(engine, command)("output-1")
 
 
 def test_stopping_a_feeder_queues_its_input_while_the_plant_runs_and_restart_clears_it():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
 
     def run_until(tick):
         while engine.tick < tick:
@@ -137,7 +138,7 @@ def test_stopping_a_feeder_queues_its_input_while_the_plant_runs_and_restart_cle
 
 def test_the_same_commands_at_the_same_ticks_give_the_same_run():
     def run():
-        engine = Engine(default_layout(), seed=5)
+        engine = Engine(compact_layout(), seed=5)
         for tick in range(3000):
             if tick == 500:
                 engine.stop_belt("collector")

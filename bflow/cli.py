@@ -42,7 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42,
                         help="random generator seed (default: 42)")
     parser.add_argument("--layout", choices=LAYOUTS, default="full",
-                        help="full: three inputs, merge, sorter, three outputs; "
+                        help="full: six desks in two islands, one sort line, four outputs; "
                              "minimal: one belt (default: full)")
     return parser
 

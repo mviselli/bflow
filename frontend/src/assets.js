@@ -19,7 +19,6 @@ export const BELT = {
   surfaceM: BELT_WIDTH_M - 0.2,      // rubber surface between the rails
   slatM: 0.125,                      // distance between two slats
   drumM: 0.12,                       // end drum beyond a free end of the belt
-  jointTrimM: BELT_WIDTH_M / 2,      // belt surface left to the transfer plate at a joint
 };
 
 export const BAG_PADDING_M = 0.16;   // room around a bag for its shadow
@@ -153,19 +152,19 @@ function inFrame(ctx, point, angle, draw) {
 }
 
 // The stretch of a belt covered by its rails, in the belt's frame: past the
-// drum at a free end, up to the transfer plate at a joint.
+// drum at a free end, up to the transfer plate at a joint (see beltEnds).
 function railSpan(belt, ends) {
   return {
-    from: ends.startJoint ? BELT.jointTrimM : -BELT.drumM - 0.04,
-    to: ends.endJoint ? belt.length_m - BELT.jointTrimM : belt.length_m + BELT.drumM + 0.04,
+    from: ends.startJoint ? ends.startTrimM : -BELT.drumM - 0.04,
+    to: ends.endJoint ? belt.length_m - ends.endTrimM : belt.length_m + BELT.drumM + 0.04,
   };
 }
 
 // The stretch of a belt covered by its moving surface, in the belt's frame.
 export function surfaceSpan(belt, ends) {
   return {
-    from: ends.startJoint ? BELT.jointTrimM : 0,
-    to: ends.endJoint ? belt.length_m - BELT.jointTrimM : belt.length_m,
+    from: ends.startJoint ? ends.startTrimM : 0,
+    to: ends.endJoint ? belt.length_m - ends.endTrimM : belt.length_m,
   };
 }
 
@@ -326,9 +325,13 @@ function drawChute(ctx) {
 
 // Airport wayfinding sign: a code box and a white caption on a dark panel,
 // always upright. (xM, yM) is its top-left corner on the map.
-function drawSign(ctx, scale, xM, yM, code, caption, codeColour) {
+function signSize(caption) {
   const height = 0.62;
-  const width = height + 0.16 + caption.length * 0.17;
+  return { width: height + 0.16 + caption.length * 0.17, height };
+}
+
+function drawSign(ctx, scale, xM, yM, code, caption, codeColour) {
+  const { width, height } = signSize(caption);
   ctx.save();
   castShadow(ctx, scale, 1.2, 0.5);
   ctx.fillStyle = '#0b0f13';
@@ -353,6 +356,19 @@ function fromFrame(origin, angle, xM, yM) {
     x_m: origin.x_m + xM * Math.cos(angle) - yM * Math.sin(angle),
     y_m: origin.y_m + xM * Math.sin(angle) + yM * Math.cos(angle),
   };
+}
+
+// Top-left corner of an upright sign standing just behind a check-in desk,
+// on the side away from its belt and centred on the belt's line, so each
+// desk's sign is next to it whichever way the belt runs.
+function signBehindDesk(position, angle, caption) {
+  const { width, height } = signSize(caption);
+  const back = fromFrame(position, angle, -1.55 - 0.1, 0);  // the desk's back edge, plus a gap
+  const awayX = -Math.cos(angle);
+  const awayY = -Math.sin(angle);
+  // Half the sign's size in the direction away from the belt.
+  const reach = (Math.abs(awayX) * width + Math.abs(awayY) * height) / 2;
+  return { x_m: back.x_m + awayX * reach - width / 2, y_m: back.y_m + awayY * reach - height / 2 };
 }
 
 // Small caption painted on the floor next to a merge or a sorter.
@@ -386,9 +402,9 @@ export function floorCanvas({ geometry, layout, screenWidth, screenHeight, resol
   for (const node of layout.merges) drawFloorCaption(ctx, scale, node.position, 'Merge');
   for (const node of layout.sorters) drawFloorCaption(ctx, scale, node.position, 'Sorter');
   for (const input of layout.inputs) {
-    const corner = fromFrame(input.position, beltAngle(firstBelt.get(input.id)), -1.55, -1.9);
-    const code = inputCodes.get(input.id);
-    drawSign(ctx, scale, corner.x_m, corner.y_m, code, `Check-in ${input.label}`, '#e8eef3');
+    const caption = `Check-in ${input.label}`;
+    const corner = signBehindDesk(input.position, beltAngle(firstBelt.get(input.id)), caption);
+    drawSign(ctx, scale, corner.x_m, corner.y_m, inputCodes.get(input.id), caption, '#e8eef3');
   }
   for (const output of layout.outputs) {
     const corner = fromFrame(output.position, beltAngle(lastBelt.get(output.id)), -1.2, -1.9);

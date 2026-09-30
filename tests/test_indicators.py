@@ -5,9 +5,10 @@ from dataclasses import replace
 import pytest
 
 from bflow.core.engine import THROUGHPUT_WINDOW_TICKS, Engine
-from bflow.core.layout import default_layout, minimal_layout
+from bflow.core.layout import minimal_layout
 from bflow.core.models import Baggage
 from bflow.core.stats import BeltStats
+from tests.layouts import compact_layout
 
 
 def advance(engine, ticks):
@@ -22,7 +23,7 @@ def place(engine, conveyor_id, name, position, destination_id="output-1"):
 
 
 def test_capacity_is_the_most_bags_a_belt_holds_with_the_gap():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     # 0.6 m bags and 0.2 m gaps: 5 on 4 m, 10 on 8 m, 15 on 12 m.
     assert engine.belt_capacities == {
         "feeder-a-1": 10, "feeder-a-2": 5, "feeder-b": 10, "feeder-c-1": 10,
@@ -44,7 +45,7 @@ def test_an_exact_fit_is_not_lost_to_rounding(length, gap, capacity):
 
 
 def test_occupancy_is_the_share_of_the_capacity_in_layout_order():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     for index in range(3):
         place(engine, "feeder-a-2", f"bag-{index}", index * 0.8)
     belts = engine.stats().belts
@@ -55,7 +56,7 @@ def test_occupancy_is_the_share_of_the_capacity_in_layout_order():
 
 
 def test_occupancy_reaches_one_and_never_exceeds_it_behind_a_stopped_branch():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     engine.stop_belt("branch-2")
     for _ in range(12000):
         engine.step()
@@ -68,7 +69,7 @@ def test_occupancy_reaches_one_and_never_exceeds_it_behind_a_stopped_branch():
 
 
 def test_waiting_is_reported_for_each_input_in_layout_order():
-    layout = default_layout()
+    layout = compact_layout()
     rates = (0.25, 10, 0.25)
     inputs = tuple(replace(node, arrival_rate_bags_s=rate)
                    for node, rate in zip(layout.inputs, rates, strict=True))
@@ -105,7 +106,7 @@ def test_throughput_counts_only_correct_deliveries():
 
 
 def test_throughput_matches_the_demand_in_steady_flow_and_falls_behind_a_stop():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     advance(engine, 12000)
     # 0.75 bags/s for 60 s.
     assert engine.stats().throughput == 45
@@ -118,7 +119,7 @@ def test_throughput_matches_the_demand_in_steady_flow_and_falls_behind_a_stop():
 
 
 def test_the_new_indicators_are_part_of_a_frozen_snapshot():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     advance(engine, 4000)
     stats = engine.stats()
     belts, inputs, throughput = stats.belts, stats.inputs, stats.throughput

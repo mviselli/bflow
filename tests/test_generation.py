@@ -6,12 +6,12 @@ from dataclasses import replace
 import pytest
 
 from bflow.core.engine import Engine
-from bflow.core.layout import default_layout
 from bflow.core.models import Baggage
+from tests.layouts import compact_layout
 
 
 def with_rates(*rates):
-    layout = default_layout()
+    layout = compact_layout()
     inputs = tuple(replace(node, arrival_rate_bags_s=rate)
                    for node, rate in zip(layout.inputs, rates, strict=True))
     return replace(layout, inputs=inputs)
@@ -64,7 +64,7 @@ def test_every_input_sends_bags_to_all_outputs_in_about_equal_shares():
 
 def test_same_seed_draws_the_same_destinations():
     def destinations(seed):
-        engine = Engine(default_layout(), seed=seed)
+        engine = Engine(compact_layout(), seed=seed)
         advance(engine, 2000)
         return sorted((bag.id, bag.destination_id) for bag in all_bags(engine))
 
@@ -112,7 +112,7 @@ def test_a_transfer_needs_the_bag_length_plus_the_gap_on_the_next_belt(offset, m
 
 
 def test_the_full_plant_conserves_bags_and_spacing_every_tick():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     gap = engine.layout.min_gap_m
     for _ in range(12000):
         engine.step()

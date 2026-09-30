@@ -99,8 +99,9 @@ def test_layout_describes_the_whole_plant_in_layout_order():
         (node.id, node.label) for node in config.inputs]
     assert [(node.id, node.label) for node in layout.outputs] == [
         (node.id, node.label) for node in config.outputs]
-    assert [node.id for node in layout.merges] == ["merge"]
-    assert layout.sorters[0].position.model_dump() == {"x_m": 20.0, "y_m": 4.0}
+    for sent, nodes in ((layout.merges, config.merges), (layout.sorters, config.sorters)):
+        assert [(node.id, node.position.x_m, node.position.y_m) for node in sent] == [
+            (node.id, node.position.x_m, node.position.y_m) for node in nodes]
     assert [belt.id for belt in layout.belts] == [belt.id for belt in config.belts]
     for sent, belt in zip(layout.belts, config.belts):
         assert (sent.source_id, sent.target_id) == (belt.source_id, belt.target_id)

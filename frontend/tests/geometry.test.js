@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  PLANT_MARGIN_M, baggagePlacement, beltAngle, beltEnds, plantBounds, plantGeometry,
+  PLANT_MARGIN_M, baggagePlacement, beltAngle, beltEnds, jointPoint, plantBounds, plantGeometry,
   plantJoints, pointAlong,
 } from '../src/geometry.js';
 import { formatTime } from '../src/controls.js';
@@ -26,7 +26,7 @@ const CORNER = {
   ],
 };
 
-// The default plant as the server sends it: rows at y = 0, 4, 8, x from 0 to 28.
+// The compact test plant as the server sends it: rows at y = 0, 4, 8, x from 0 to 28.
 const PLANT = {
   inputs: ['a', 'b', 'c'].map((letter, i) => ({
     id: `input-${letter}`, label: letter.toUpperCase(), position: point(0, 4 * i),
@@ -102,11 +102,15 @@ test('a bag is drawn centred on the middle of its length', () => {
   const down = CORNER.belts[1];
   // Front edge at the end of the first belt: centre 0.3 m before the corner.
   const atCorner = baggagePlacement(geometry, across, { position_m: 9.4, length_m: 0.6 });
-  assert.deepEqual({ x: atCorner.x, y: atCorner.y }, geometry.toScreen(point(9.7, 0)));
+  const corner = geometry.toScreen(point(9.7, 0));
+  close(atCorner.x, corner.x);
+  close(atCorner.y, corner.y);
   close(atCorner.angle, 0);
   // Rear edge at the start of the next belt: centre 0.3 m below the corner.
   const turned = baggagePlacement(geometry, down, { position_m: 0, length_m: 0.6 });
-  assert.deepEqual({ x: turned.x, y: turned.y }, geometry.toScreen(point(10, 0.3)));
+  const below = geometry.toScreen(point(10, 0.3));
+  close(turned.x, below.x);
+  close(turned.y, below.y);
   close(turned.angle, Math.PI / 2);
 });
 
@@ -121,10 +125,52 @@ test('the minimum gap between bags keeps its proportion on screen', () => {
 
 test('belt ends at inputs and outputs are free, the others are joints', () => {
   const ends = beltEnds(PLANT);
-  assert.deepEqual(ends.get('feeder-a-1'), { startJoint: false, endJoint: true });
-  assert.deepEqual(ends.get('feeder-b'), { startJoint: false, endJoint: true });
-  assert.deepEqual(ends.get('collector'), { startJoint: true, endJoint: true });
-  assert.deepEqual(ends.get('branch-2'), { startJoint: true, endJoint: false });
+  const half = { startTrimM: 0, endTrimM: 0.5 };
+  assert.deepEqual(ends.get('feeder-a-1'), { startJoint: false, endJoint: true, ...half });
+  assert.deepEqual(ends.get('feeder-b'), { startJoint: false, endJoint: true, ...half });
+  assert.deepEqual(ends.get('collector'),
+    { startJoint: true, endJoint: true, startTrimM: 0.5, endTrimM: 0.5 });
+  assert.deepEqual(ends.get('branch-2'),
+    { startJoint: true, endJoint: false, startTrimM: 0.5, endTrimM: 0 });
+});
+
+// A side join as in the demo plant: a desk's feeder comes down and stops at
+// the edge of the merge's plate; the collector passes through its centre.
+const SIDE_JOIN = {
+  inputs: [
+    { id: 'input-a1', label: 'A1', position: point(2, 0) },
+    { id: 'input-a2', label: 'A2', position: point(6, 0) },
+  ],
+  merges: [{ id: 'merge-a2', position: point(6, 4) }],
+  sorters: [],
+  outputs: [{ id: 'output-1', label: 'BF 101', position: point(10, 4) }],
+  belts: [
+    belt('feeder-a1', 'input-a1', 'island-a-1', point(2, 0), point(2, 4)),
+    belt('island-a-1', 'feeder-a1', 'merge-a2', point(2, 4), point(6, 4)),
+    belt('feeder-a2', 'input-a2', 'merge-a2', point(6, 0), point(6, 3.5)),
+    belt('island-a-2', 'merge-a2', 'output-1', point(6, 4), point(10, 4)),
+  ],
+};
+
+test('a belt stopping at the edge of a plate is not covered by it', () => {
+  const ends = beltEnds(SIDE_JOIN);
+  assert.equal(ends.get('feeder-a2').endTrimM, 0);
+  assert.equal(ends.get('island-a-1').endTrimM, 0.5);
+  assert.equal(ends.get('island-a-2').startTrimM, 0.5);
+});
+
+test('a plate is open on the sides its belts come from, even from the edge', () => {
+  const merge = plantJoints(SIDE_JOIN).find((joint) => joint.id === 'merge-a2');
+  const sides = merge.directions
+    .map((angle) => (((Math.round(angle / (Math.PI / 2)) % 4) + 4) % 4)).sort();
+  assert.deepEqual(sides, [0, 2, 3]);  // out right, in from the left, in from above
+});
+
+test('the joint between two belts is where their lines cross', () => {
+  const [, islandA1, feederA2, islandA2] = SIDE_JOIN.belts;
+  assert.deepEqual(jointPoint(feederA2, islandA2), point(6, 4));
+  assert.deepEqual(jointPoint(islandA1, islandA2), point(6, 4));
+  assert.deepEqual(jointPoint(...CORNER.belts), point(10, 0));
 });
 
 test('joints are the merges, the sorters and the corners, with their open sides', () => {

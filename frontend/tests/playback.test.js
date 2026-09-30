@@ -118,15 +118,20 @@ test('the belt surface offset follows speed × time and repeats every slat', () 
 });
 
 // A corner and a sorter, as in the plant: across → (corner) → down → sorter
-// → left or right. Lengths in metres.
-function belt(id, source_id, target_id, length_m) {
-  return { id, source_id, target_id, length_m };
+// at (10, 4) → left or right. A side belt joins a merge at (20, 4) from
+// above, stopping at the edge of its plate. Map coordinates in metres.
+const point = (x_m, y_m) => ({ x_m, y_m });
+function belt(id, source_id, target_id, start, end) {
+  const length_m = Math.hypot(end.x_m - start.x_m, end.y_m - start.y_m);
+  return { id, source_id, target_id, start, end, length_m };
 }
 const BELTS = new Map([
-  belt('across', 'input-a', 'down', 10),
-  belt('down', 'across', 'sorter', 4),
-  belt('left', 'sorter', 'output-1', 8),
-  belt('right', 'sorter', 'output-2', 8),
+  belt('across', 'input-a', 'down', point(0, 0), point(10, 0)),
+  belt('down', 'across', 'sorter', point(10, 0), point(10, 4)),
+  belt('left', 'sorter', 'output-1', point(10, 4), point(2, 4)),
+  belt('right', 'sorter', 'merge', point(10, 4), point(20, 4)),
+  belt('side', 'input-b', 'merge', point(20, 0), point(20, 3.5)),
+  belt('line', 'merge', 'output-2', point(20, 4), point(30, 4)),
 ].map((b) => [b.id, b]));
 
 function on(conveyor, id, position) {
@@ -183,4 +188,20 @@ test('the playback slides bags between snapshots on different belts', () => {
   assert.equal(middle.conveyor_id, 'down');
   assert.ok(Math.abs(middle.position_m - -0.3) < 1e-9);
   assert.equal(middle.alpha, 1);
+});
+
+test('a bag joining from the side slides past the belt end to the centre of the plate', () => {
+  // Front edge at the end of the side belt, 0.5 m before the merge's centre;
+  // then rear edge at the start of the line, on the centre. Its centre moves
+  // 0.3 + 0.5 m down to the plate's centre, then 0.3 m along the line.
+  const previous = [on('side', 'B1', 2.9)];
+  const next = [on('line', 'B1', 0)];
+  const at = (fraction) => interpolateBaggage(previous, next, fraction, BELTS)[0];
+  // Half way (0.55 m): still coming down, 0.05 m before the centre.
+  assert.equal(at(0.5).conveyor_id, 'side');
+  assert.ok(Math.abs(at(0.5).position_m - 3.45) < 1e-9);
+  // Three quarters (0.825 m): turned onto the line, centre 0.025 m past the centre.
+  assert.equal(at(0.75).conveyor_id, 'line');
+  assert.ok(Math.abs(at(0.75).position_m - -0.275) < 1e-9);
+  assert.ok(Math.abs(at(1).position_m) < 1e-9);
 });

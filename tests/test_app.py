@@ -160,29 +160,29 @@ def test_snapshots_follow_start_pause_and_resume():
         receive_until(ws, is_snapshot(0, True))
         # One second at a time: a larger jump would exceed the per-update
         # tick limit and the runner would drop the backlog.
-        for tick in (20, 40, 60, 80, 100):
+        for tick in range(20, 160, 20):
             clock.now += 1
             snapshot = receive_until(ws, is_snapshot(tick, True))
-        # The first bags arrive at 4 s: the same state as an engine stepped
+        # The first bags arrive at 6.67 s: the same state as an engine stepped
         # directly, bags and counters included.
         engine = Engine(default_layout())
-        for _ in range(100):
+        for _ in range(140):
             engine.step()
         assert snapshot == snapshot_message(engine, running=True).model_dump(mode="json")
         assert snapshot["baggage"]
 
         ws.send_text('{"type": "pause"}')
-        receive_until(ws, is_snapshot(100, False))
+        receive_until(ws, is_snapshot(140, False))
         clock.now += 5
         # Snapshots keep arriving while paused, with frozen time.
         for _ in range(3):
-            assert is_snapshot(100, False)(ws.receive_json())
+            assert is_snapshot(140, False)(ws.receive_json())
 
         ws.send_text('{"type": "start"}')
         # Wait until the runner has resumed before moving the clock.
-        receive_until(ws, is_snapshot(100, True))
+        receive_until(ws, is_snapshot(140, True))
         clock.now += 0.5
-        receive_until(ws, is_snapshot(110, True))
+        receive_until(ws, is_snapshot(150, True))
 
 
 def test_each_event_is_sent_once_per_connection():

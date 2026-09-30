@@ -3,11 +3,12 @@
 An educational airport baggage-sorting simulator: a Python engine and a 2D
 browser view built with PixiJS.
 
-The engine models a plant with three check-in desks, a merge, a common line, a
-sorter and three output branches. Bags arrive at each desk, take turns at the
-merge and are sorted to their destination. Belts can be stopped and restarted.
-The browser shows the whole plant; the command line runs it without the
-browser.
+The engine models a small airport plant: six check-in desks in two islands,
+whose belts join one sort line, and three diverts along the line that send
+each bag to one of four flights. Bags arrive at each desk, take turns wherever
+two belts merge and are sorted to their destination. Belts can be stopped and
+restarted. The browser shows the whole plant; the command line runs it
+without the browser.
 
 ## Requirements
 

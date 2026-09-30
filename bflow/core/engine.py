@@ -60,7 +60,8 @@ class Engine:
         for belt in self.layout.belts:
             if belt.target_id in self.conveyors:
                 self._next_conveyors[belt.id] = self.conveyors[belt.target_id]
-            elif belt.source_id in self.merge_inputs:
+            # Not elif: a belt leaving a merge may also turn a corner.
+            if belt.source_id in self.merge_inputs:
                 for belt_id in self.merge_inputs[belt.source_id]:
                     self._next_conveyors[belt_id] = self.conveyors[belt.id]
         # Belt whose bag each merge let through last; None before the first.

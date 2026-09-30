@@ -26,3 +26,5 @@ packages = ["bflow"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
+# Lets the tests import their shared plants: from tests.layouts import ...
+pythonpath = ["."]

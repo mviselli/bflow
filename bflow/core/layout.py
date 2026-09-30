@@ -1,4 +1,4 @@
-"""Predefined plant: three inputs, a merge, a common line, a sorter, three outputs.
+"""Predefined plant: two check-in islands, one sort line with diverts, four outputs.
 
 The plant is a graph. Inputs, merges, sorters and outputs are the nodes;
 belts are the edges and carry bags from their source to their target. A
@@ -12,11 +12,23 @@ move is exactly the distance between the two points. The page only scales
 metres to pixels.
 
 ```text
-input-a ─ feeder-a-1 ─┐                    ┌─ branch-1-2 ─ output-1
-                  feeder-a-2          branch-1-1
-input-b ─ feeder-b ─ merge ─ collector ─ sorter ─ branch-2 ─ output-2
-                  feeder-c-2          branch-3-1
-input-c ─ feeder-c-1 ─┘                    └─ branch-3-2 ─ output-3
+  A1      A2      A3                     island A: desks above, feeding down
+  └───────M───────M───────────┐
+                              M═════D1════D2════D3════> output-4
+  ┌───────M───────M───────────┘     │     │     │
+  B1      B2      B3                output-1..3        island B: desks below
+```
+
+Belt by belt (← means "fed by"):
+
+```text
+merge-a2   ← island-a-1 ← feeder-a1 ← input-a1,   feeder-a2 ← input-a2
+merge-a3   ← island-a-2 ← merge-a2,               feeder-a3 ← input-a3
+merge-b2   ← island-b-1 ← feeder-b1 ← input-b1,   feeder-b2 ← input-b2
+merge-b3   ← island-b-2 ← merge-b2,               feeder-b3 ← input-b3
+merge-main ← island-a-3 ← merge-a3,  island-b-4 ← island-b-3 ← merge-b3
+merge-main → line-1 → divert-1 → line-2 → divert-2 → line-3 → divert-3 → line-4 → output-4
+divert-n   → branch-n → output-n   (n = 1, 2, 3)
 ```
 
 Each element checks its own values; LayoutConfig then checks that the
@@ -29,6 +41,14 @@ from dataclasses import dataclass
 from math import hypot, isfinite
 
 from bflow.core.checks import check_identifier, check_quantity
+
+
+# Side of the square transfer plate at a merge or sorter, as wide as a belt.
+# A belt joining the line from the side ends at the edge of the plate, so a
+# bag waiting there stays beside the line; belts along the line reach the
+# centre. The engine only uses lengths along the belts: crossing the plate is
+# part of the transfer.
+JUNCTION_SIZE_M = 1.0
 
 
 @dataclass(frozen=True)
@@ -155,7 +175,10 @@ def _check_layout(layout: LayoutConfig) -> None:
     3. When a belt feeds another belt, both agree: the target's source is it.
     4. An input feeds one belt; a merge joins two or more belts into one; a
        sorter splits one belt into two or more; an output receives one belt.
-    5. Connected ends meet on the map, and a bag fits on every belt.
+    5. Connected ends meet on the map: exactly at an input, an output or
+       another belt; at a merge or sorter on its centre or up to half a
+       junction before it, with the belt pointing at the centre (see
+       _meets_junction). A bag fits on every belt.
     6. No cycles: a bag can never come back to where it has been.
     7. Exactly one route from every input to every output: every output is
        reachable, and there are no alternative routes.
@@ -211,9 +234,17 @@ def _check_layout(layout: LayoutConfig) -> None:
             raise ValueError(f"Output {node.id} must receive exactly one belt, not {incoming[node.id]}")
 
     for belt in layout.belts:
-        source = belts[belt.source_id].end if belt.source_id in belts else positions[belt.source_id]
-        target = belts[belt.target_id].start if belt.target_id in belts else positions[belt.target_id]
-        if belt.start != source or belt.end != target:
+        if belt.source_id in junction_ids:
+            starts_right = _meets_junction(belt, positions[belt.source_id], at_end=False)
+        else:
+            source = belts[belt.source_id].end if belt.source_id in belts else positions[belt.source_id]
+            starts_right = belt.start == source
+        if belt.target_id in junction_ids:
+            ends_right = _meets_junction(belt, positions[belt.target_id], at_end=True)
+        else:
+            target = belts[belt.target_id].start if belt.target_id in belts else positions[belt.target_id]
+            ends_right = belt.end == target
+        if not starts_right or not ends_right:
             raise ValueError(f"Belt {belt.id} must start where {belt.source_id} is "
                              f"and end where {belt.target_id} is on the map")
         if layout.baggage_length_m > belt.length_m:
@@ -244,6 +275,24 @@ def _check_layout(layout: LayoutConfig) -> None:
                                  f"{output_id}; alternative routes are not supported")
 
 
+def _meets_junction(belt: BeltConfig, centre: Point, *, at_end: bool) -> bool:
+    """True if a belt's end touches the plate of a merge or sorter centred at ``centre``.
+
+    The end must be on the centre, or on the belt's own line up to half a
+    junction before it: an incoming belt stops short of the centre, an
+    outgoing one starts after it. The tiny margins absorb rounding.
+    """
+    end = belt.end if at_end else belt.start
+    # Unit vector along the belt, turned to point from the end towards the centre.
+    sign = 1 if at_end else -1
+    ux = sign * (belt.end.x_m - belt.start.x_m) / belt.length_m
+    uy = sign * (belt.end.y_m - belt.start.y_m) / belt.length_m
+    dx, dy = centre.x_m - end.x_m, centre.y_m - end.y_m
+    ahead = dx * ux + dy * uy        # distance from the end to the centre, along the belt
+    aside = abs(dx * uy - dy * ux)   # distance of the centre from the belt's line
+    return aside <= 1e-9 and -1e-9 <= ahead <= JUNCTION_SIZE_M / 2 + 1e-9
+
+
 def _topological_order(successors: dict[str, list[str]]) -> list[str]:
     """Orders the elements so that each comes before its successors (Kahn's algorithm).
 
@@ -268,38 +317,67 @@ def _topological_order(successors: dict[str, list[str]]) -> list[str]:
 
 
 def default_layout() -> LayoutConfig:
-    """The demo plant of the diagram above.
+    """The demo plant of the diagram above: two check-in islands, one sort line.
 
-    Every belt is horizontal or vertical, so lengths are exact. Each input
-    generates 0.25 bags/s: together 0.75 bags/s, below the 1.25 bags/s that a
-    1 m/s line can carry with 0.6 m bags and a 0.2 m gap.
+    Every belt is horizontal or vertical, so lengths are exact. Desks feed
+    their island collector from the side and stop at the edge of the merge's
+    plate; the collectors and the sort line pass through the centres. Each
+    desk generates 0.15 bags/s: together 0.9 bags/s, below the 1.25 bags/s
+    that a 1 m/s line can carry with 0.6 m bags and a 0.2 m gap.
     """
-    rate = 0.25
+    rate = 0.15
+    edge = JUNCTION_SIZE_M / 2
     return LayoutConfig(
         inputs=(
-            InputConfig("input-a", "A", Point(0, 0), rate),
-            InputConfig("input-b", "B", Point(0, 4), rate),
-            InputConfig("input-c", "C", Point(0, 8), rate),
+            InputConfig("input-a1", "A1", Point(2, 0), rate),
+            InputConfig("input-a2", "A2", Point(6, 0), rate),
+            InputConfig("input-a3", "A3", Point(10, 0), rate),
+            InputConfig("input-b1", "B1", Point(2, 12), rate),
+            InputConfig("input-b2", "B2", Point(6, 12), rate),
+            InputConfig("input-b3", "B3", Point(10, 12), rate),
         ),
-        merges=(MergeConfig("merge", Point(8, 4)),),
-        sorters=(SorterConfig("sorter", Point(20, 4)),),
+        merges=(
+            MergeConfig("merge-a2", Point(6, 4)),
+            MergeConfig("merge-a3", Point(10, 4)),
+            MergeConfig("merge-b2", Point(6, 8)),
+            MergeConfig("merge-b3", Point(10, 8)),
+            MergeConfig("merge-main", Point(16, 4)),
+        ),
+        sorters=(
+            SorterConfig("divert-1", Point(22, 4)),
+            SorterConfig("divert-2", Point(27, 4)),
+            SorterConfig("divert-3", Point(32, 4)),
+        ),
         outputs=(
-            OutputConfig("output-1", "BF 101", Point(28, 0)),
-            OutputConfig("output-2", "BF 205", Point(28, 4)),
-            OutputConfig("output-3", "BF 312", Point(28, 8)),
+            OutputConfig("output-1", "BF 101", Point(22, 9)),
+            OutputConfig("output-2", "BF 205", Point(27, 9)),
+            OutputConfig("output-3", "BF 312", Point(32, 9)),
+            OutputConfig("output-4", "BF 418", Point(37, 4)),
         ),
         belts=(
-            BeltConfig("feeder-a-1", "input-a", "feeder-a-2", Point(0, 0), Point(8, 0)),
-            BeltConfig("feeder-a-2", "feeder-a-1", "merge", Point(8, 0), Point(8, 4)),
-            BeltConfig("feeder-b", "input-b", "merge", Point(0, 4), Point(8, 4)),
-            BeltConfig("feeder-c-1", "input-c", "feeder-c-2", Point(0, 8), Point(8, 8)),
-            BeltConfig("feeder-c-2", "feeder-c-1", "merge", Point(8, 8), Point(8, 4)),
-            BeltConfig("collector", "merge", "sorter", Point(8, 4), Point(20, 4)),
-            BeltConfig("branch-1-1", "sorter", "branch-1-2", Point(20, 4), Point(20, 0)),
-            BeltConfig("branch-1-2", "branch-1-1", "output-1", Point(20, 0), Point(28, 0)),
-            BeltConfig("branch-2", "sorter", "output-2", Point(20, 4), Point(28, 4)),
-            BeltConfig("branch-3-1", "sorter", "branch-3-2", Point(20, 4), Point(20, 8)),
-            BeltConfig("branch-3-2", "branch-3-1", "output-3", Point(20, 8), Point(28, 8)),
+            # Island A: desks above, feeding down into the collector.
+            BeltConfig("feeder-a1", "input-a1", "island-a-1", Point(2, 0), Point(2, 4)),
+            BeltConfig("island-a-1", "feeder-a1", "merge-a2", Point(2, 4), Point(6, 4)),
+            BeltConfig("feeder-a2", "input-a2", "merge-a2", Point(6, 0), Point(6, 4 - edge)),
+            BeltConfig("island-a-2", "merge-a2", "merge-a3", Point(6, 4), Point(10, 4)),
+            BeltConfig("feeder-a3", "input-a3", "merge-a3", Point(10, 0), Point(10, 4 - edge)),
+            BeltConfig("island-a-3", "merge-a3", "merge-main", Point(10, 4), Point(16, 4)),
+            # Island B: desks below, feeding up; its collector joins the line from below.
+            BeltConfig("feeder-b1", "input-b1", "island-b-1", Point(2, 12), Point(2, 8)),
+            BeltConfig("island-b-1", "feeder-b1", "merge-b2", Point(2, 8), Point(6, 8)),
+            BeltConfig("feeder-b2", "input-b2", "merge-b2", Point(6, 12), Point(6, 8 + edge)),
+            BeltConfig("island-b-2", "merge-b2", "merge-b3", Point(6, 8), Point(10, 8)),
+            BeltConfig("feeder-b3", "input-b3", "merge-b3", Point(10, 12), Point(10, 8 + edge)),
+            BeltConfig("island-b-3", "merge-b3", "island-b-4", Point(10, 8), Point(16, 8)),
+            BeltConfig("island-b-4", "island-b-3", "merge-main", Point(16, 8), Point(16, 4 + edge)),
+            # The sort line, with a branch down to a chute at each divert.
+            BeltConfig("line-1", "merge-main", "divert-1", Point(16, 4), Point(22, 4)),
+            BeltConfig("branch-1", "divert-1", "output-1", Point(22, 4 + edge), Point(22, 9)),
+            BeltConfig("line-2", "divert-1", "divert-2", Point(22, 4), Point(27, 4)),
+            BeltConfig("branch-2", "divert-2", "output-2", Point(27, 4 + edge), Point(27, 9)),
+            BeltConfig("line-3", "divert-2", "divert-3", Point(27, 4), Point(32, 4)),
+            BeltConfig("branch-3", "divert-3", "output-3", Point(32, 4 + edge), Point(32, 9)),
+            BeltConfig("line-4", "divert-3", "output-4", Point(32, 4), Point(37, 4)),
         ),
     )
 

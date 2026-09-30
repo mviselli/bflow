@@ -7,16 +7,17 @@ from dataclasses import replace
 import pytest
 
 from bflow.core.engine import Engine
-from bflow.core.layout import default_layout, minimal_layout
+from bflow.core.layout import minimal_layout
 from bflow.core.models import Baggage
+from tests.layouts import compact_layout
 
 
 BRANCHES = {"output-1": "branch-1-1", "output-2": "branch-2", "output-3": "branch-3-1"}
 
 
 def quiet_engine():
-    """An engine on the default plant with no arrivals."""
-    layout = default_layout()
+    """An engine on the compact plant with no arrivals."""
+    layout = compact_layout()
     inputs = tuple(replace(node, arrival_rate_bags_s=0) for node in layout.inputs)
     return Engine(replace(layout, inputs=inputs))
 
@@ -28,7 +29,7 @@ def place(engine, conveyor_id, name, destination_id, position):
 
 
 def test_each_output_is_reached_through_one_predetermined_branch():
-    assert Engine(default_layout()).sorter_routes == {"sorter": BRANCHES}
+    assert Engine(compact_layout()).sorter_routes == {"sorter": BRANCHES}
     assert Engine(minimal_layout()).sorter_routes == {}
 
 
@@ -85,7 +86,7 @@ def test_evaluation_at_the_sorter_is_read_only():
 
 
 def test_the_full_plant_delivers_every_bag_to_its_destination():
-    engine = Engine(default_layout())
+    engine = Engine(compact_layout())
     delivered = Counter()
     for _ in range(12000):
         engine.step()
@@ -100,7 +101,7 @@ def test_the_full_plant_delivers_every_bag_to_its_destination():
 
 
 def test_a_slow_branch_blocks_the_sorter_and_the_queue_grows_upstream():
-    layout = default_layout()
+    layout = compact_layout()
     # 0.1 m/s carries 0.125 bags/s; output 2 gets about 0.25 bags/s.
     belts = tuple(replace(belt, speed_m_s=0.1) if belt.id == "branch-2" else belt
                   for belt in layout.belts)

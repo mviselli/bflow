@@ -8,14 +8,15 @@ import pytest
 from bflow.core.engine import Engine
 from bflow.core.layout import OutputConfig, Point, default_layout
 from bflow.core.models import Baggage
+from tests.layouts import compact_layout
 
 
 FEEDERS = ("feeder-a-2", "feeder-b", "feeder-c-2")
 
 
 def quiet_engine(layout=None):
-    """An engine on the default plant (or another one) with no arrivals."""
-    layout = layout or default_layout()
+    """An engine on the compact plant (or another one) with no arrivals."""
+    layout = layout or compact_layout()
     inputs = tuple(replace(node, arrival_rate_bags_s=0) for node in layout.inputs)
     return Engine(replace(layout, inputs=inputs))
 
@@ -119,7 +120,7 @@ def test_the_merge_needs_the_bag_length_plus_the_gap_on_the_collector(offset, mo
 
 def merge_to_one_output():
     """Three inputs → merge → collector → one output: the merge with nothing after it."""
-    layout = default_layout()
+    layout = compact_layout()
     output = OutputConfig("output-1", "BF 101", Point(20, 4))
     belts = layout.belts[:5] + (replace(layout.belts[5], target_id="output-1"),)
     return replace(layout, sorters=(), outputs=(output,), belts=belts)
@@ -155,3 +156,22 @@ def test_below_capacity_the_merge_lets_every_bag_through():
     assert engine.generated_count == 450
     assert engine.correctly_delivered_count + engine.in_transit_count == 450
     assert engine.in_transit_count < 20
+
+
+def test_a_belt_leaving_a_merge_can_turn_a_corner():
+    # In the demo plant island B's collector leaves merge-b3 and turns up
+    # towards the line: the belts entering merge-b3 hand over to it.
+    engine = quiet_engine(default_layout())
+    for belt_id in ("island-b-2", "feeder-b3"):
+        conveyor = engine.conveyors[belt_id]
+        bag = Baggage(id=f"bag-{belt_id}", destination_id="output-1", length_m=0.6,
+                      generated_at_s=0, conveyor_id=belt_id, entered_at_s=0,
+                      position_m=conveyor.config.length_m - 0.6)
+        conveyor.baggage.append(bag)
+        engine.admitted_count += 1
+    engine.step()
+    assert [bag.id for bag in engine.conveyors["island-b-3"].baggage] == ["bag-island-b-2"]
+    for _ in range(40):
+        engine.step()
+    assert [bag.id for bag in engine.conveyors["island-b-3"].baggage][-1] == "bag-island-b-2"
+    assert engine.conveyors["feeder-b3"].baggage == []

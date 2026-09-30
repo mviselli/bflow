@@ -11,6 +11,7 @@ import pytest
 
 from bflow.core.engine import STEP_SECONDS, Engine
 from bflow.core.layout import default_layout
+from tests.layouts import compact_layout
 
 # Rounding margin for positions, as in the other spacing tests.
 EPSILON = 1e-9
@@ -151,27 +152,34 @@ class PlantChecker:
                 assert conveyor.stopped or not waiting or not at_end(conveyor, waiting[0])
 
 
-def with_rates(rate):
-    layout = default_layout()
+def with_rates(rate, layout=None):
+    layout = layout or compact_layout()
     return replace(layout, inputs=tuple(replace(node, arrival_rate_bags_s=rate)
                                         for node in layout.inputs))
 
 
 def with_slow_branch_2():
-    layout = default_layout()
+    layout = compact_layout()
     return replace(layout, belts=tuple(replace(belt, speed_m_s=0.1) if belt.id == "branch-2"
                                        else belt for belt in layout.belts))
 
 
-# Layout, commands by tick, number of ticks.
+# Layout, commands by tick, number of ticks. The compact plant has three-way
+# junctions; the demo plant chains two-way merges and diverts.
 SCENARIOS = {
-    "normal flow": (default_layout(), {}, 12000),
+    "normal flow": (compact_layout(), {}, 12000),
     "saturated inputs": (with_rates(1), {}, 6000),
-    "feeder B stopped for 120 s": (default_layout(), {
+    "feeder B stopped for 120 s": (compact_layout(), {
         2000: ("stop_belt", "feeder-b"), 4400: ("restart_belt", "feeder-b")}, 12000),
-    "collector stopped for 60 s": (default_layout(), {
+    "collector stopped for 60 s": (compact_layout(), {
         3000: ("stop_belt", "collector"), 4200: ("restart_belt", "collector")}, 12000),
     "slow branch 2": (with_slow_branch_2(), {}, 6000),
+    "demo: normal flow": (default_layout(), {}, 12000),
+    "demo: saturated desks": (with_rates(1, default_layout()), {}, 6000),
+    "demo: island B stopped for 120 s": (default_layout(), {
+        3000: ("stop_belt", "island-b-3"), 5400: ("restart_belt", "island-b-3")}, 12000),
+    "demo: branch 2 stopped for 120 s": (default_layout(), {
+        3000: ("stop_belt", "branch-2"), 5400: ("restart_belt", "branch-2")}, 12000),
 }
 
 
@@ -216,6 +224,55 @@ def test_saturated_inputs_leave_queues_at_every_input_and_full_feeders():
     assert all(node.waiting > 0 for node in stats.inputs)
     feeders = [belt for belt in stats.belts if belt.belt_id.startswith("feeder")]
     assert all(belt.occupancy >= 0.8 for belt in feeders)
+
+
+def test_the_demo_plant_below_capacity_serves_every_output_with_no_queue():
+    engine = run(*SCENARIOS["demo: normal flow"])
+    stats = engine.stats()
+    assert stats.waiting == 0
+    for node in stats.outputs:
+        assert 0.2 < node.correctly_delivered / stats.correctly_delivered < 0.3
+
+
+def test_chained_merges_give_the_desk_nearest_the_line_the_largest_share():
+    # Saturated, each island gets half of the line; within an island the
+    # last desk gets half of that, the two before it a quarter each.
+    engine = run(*SCENARIOS["demo: saturated desks"])
+    admitted = {input_id: engine.generated_by_input[input_id] - len(queue)
+                for input_id, queue in engine.waiting.items()}
+    total = sum(admitted.values())
+    for island in "ab":
+        assert 0.2 < admitted[f"input-{island}3"] / total < 0.27
+        for desk in "12":
+            assert 0.1 < admitted[f"input-{island}{desk}"] / total < 0.15
+
+
+def test_a_stopped_island_queues_only_its_own_desks_and_then_clears():
+    engine = Engine(default_layout())
+    for tick in range(5400):
+        if tick == 3000:
+            engine.stop_belt("island-b-3")
+        engine.step()
+    stats = engine.stats()
+    waiting = {node.input_id: node.waiting for node in stats.inputs}
+    assert all(waiting[f"input-b{desk}"] > 0 for desk in "123")
+    assert all(waiting[f"input-a{desk}"] == 0 for desk in "123")
+    engine = run(*SCENARIOS["demo: island B stopped for 120 s"])
+    assert engine.waiting_count == 0
+
+
+def test_a_stopped_branch_blocks_the_whole_line_behind_its_divert():
+    engine = Engine(default_layout())
+    for tick in range(5400):
+        if tick == 3000:
+            engine.stop_belt("branch-2")
+        engine.step()
+    # A bag for output 2 waits at divert 2 and holds up every bag behind it.
+    head = engine.conveyors["line-2"].baggage[-1]
+    assert head.destination_id == "output-2"
+    assert all(node.waiting > 0 for node in engine.stats().inputs)
+    engine = run(*SCENARIOS["demo: branch 2 stopped for 120 s"])
+    assert engine.waiting_count == 0
 
 
 def unfair_merge(engine):
