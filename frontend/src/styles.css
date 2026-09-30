@@ -15,6 +15,8 @@ p { color: #aebfce; }
 .eyebrow { color: #75d7c0; margin-bottom: 8px; }
 section { margin-top: 32px; padding: 24px; border: 1px solid #304354; border-radius: 12px; }
 #status { margin-top: 8px; }
+.plant { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; }
+@media (max-width: 900px) { .plant { grid-template-columns: minmax(0, 1fr); } }
 #map { position: relative; height: clamp(300px, 55vh, 560px); overflow: hidden; border-radius: 6px; }
 /* The map handles dragging itself instead of scrolling the page. */
 canvas { display: block; touch-action: none; }
@@ -24,7 +26,21 @@ canvas { display: block; touch-action: none; }
   background: rgba(14, 25, 35, 0.85); border: 1px solid #304354;
 }
 .map-tools button:hover { border-color: #75d7c0; }
-#selection { margin: 8px 0 0; min-height: 1.5em; font-size: 14px; }
+#hint { margin: 8px 0 0; font-size: 14px; }
+#panel { padding: 14px 16px; border: 1px solid #304354; border-radius: 6px; font-size: 14px; }
+#panel h3 { margin: 0 0 10px; font-size: 16px; overflow-wrap: anywhere; }
+#panel p { margin: 0; }
+#panel dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+#panel dt { color: #aebfce; }
+#panel dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#panel .occupancy { height: 8px; margin-top: 12px; border-radius: 4px; background: #304354; overflow: hidden; }
+#panel .occupancy span { display: block; height: 100%; background: #75d7c0; }
+#panel[data-stopped="true"] dd:first-of-type { color: #f0a36b; }
+.panel-tag { margin-bottom: 10px !important; color: #e8eef3; font-weight: 600; }
+.panel-tag span {
+  display: inline-block; min-width: 1.6em; margin-right: 4px; padding: 0 4px; border-radius: 4px;
+  color: #0b0f13; font-weight: 800; text-align: center;
+}
 
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
 .toolbar h2 { margin-right: auto; }

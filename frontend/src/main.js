@@ -1,6 +1,8 @@
 import { Application } from 'pixi.js';
 import { connect } from './connection.js';
 import { createControls } from './controls.js';
+import { destinationLooks } from './looks.js';
+import { createPanel, panelContent } from './panel.js';
 import { createRenderer } from './renderer.js';
 import './styles.css';
 
@@ -22,12 +24,16 @@ async function initialize() {
   status.textContent = 'Connecting to the simulation server…';
 
   let layout = null;
-  const selection = document.querySelector('#selection');
-  const hint = 'Click a bag or a belt to select it. Scroll to zoom, drag to move the view.';
-  selection.textContent = hint;
+  let destinations = new Map();
+  let latest = null;     // the newest snapshot
+  let selected = null;
+  const panel = createPanel(document.querySelector('#panel'));
+  const showPanel = () => panel.show(panelContent(selected, layout, latest, destinations));
+  showPanel();
   const renderer = createRenderer(app, {
-    onSelect(selected) {
-      selection.textContent = selected ? describeSelection(selected, layout) : hint;
+    onSelect(selection) {
+      selected = selection;
+      showPanel();
     },
   });
   document.querySelector('#zoom-in').addEventListener('click', () => renderer.zoomIn());
@@ -47,22 +53,18 @@ async function initialize() {
     onMessage(message) {
       if (message.type === 'layout') {
         layout = message;
+        destinations = destinationLooks(layout.outputs);
+        latest = null;
         renderer.setLayout(message);
       }
       else if (message.type === 'snapshot') {
         renderer.setSnapshot(message);
         controls.setSnapshot(message);
+        latest = message;
+        showPanel();
       } else if (message.type === 'error') console.warn(message.message);
     },
   });
-}
-
-// One line about the selected bag or belt; the side panel will show more.
-function describeSelection(selected, layout) {
-  if (selected.kind === 'belt') return `Selected belt ${selected.id} · Esc to clear`;
-  const output = layout?.outputs.find((node) => node.id === selected.destination_id);
-  const destination = output ? ` going to ${output.label}` : '';
-  return `Selected bag ${selected.id}${destination} · Esc to clear`;
 }
 
 initialize().catch((error) => {

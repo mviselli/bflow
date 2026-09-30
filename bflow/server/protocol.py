@@ -96,13 +96,34 @@ class LayoutMessage(TimedMessage):
 
 
 class BaggageState(Message):
-    """A bag on a belt; position_m is its rear edge, as in the engine."""
+    """A bag on a belt; position_m is its rear edge, as in the engine.
+
+    entered_at_s is the simulated time of its admission: the bag's travel
+    time so far is the snapshot's time_s minus it.
+    """
 
     id: str = Field(min_length=1)
     destination_id: str = Field(min_length=1)
     conveyor_id: str = Field(min_length=1)
     position_m: float = Field(ge=0)
     length_m: float = Field(gt=0)
+    entered_at_s: float = Field(ge=0)
+
+
+class BeltState(Message):
+    """The operator's local stop of one belt (not the global pause)."""
+
+    id: str = Field(min_length=1)
+    stopped: bool
+
+
+class BeltStatsState(Message):
+    """Bags on one belt against the most it can hold, as the engine counts them."""
+
+    belt_id: str = Field(min_length=1)
+    bags: int = Field(ge=0)
+    capacity: int = Field(ge=1)
+    occupancy: float = Field(ge=0)
 
 
 class StatsState(Message):
@@ -117,6 +138,8 @@ class StatsState(Message):
     mean_travel_time_s: float | None = Field(ge=0)
     errors: int = Field(ge=0)
     warnings: int = Field(ge=0)
+    # One entry per belt, in layout order.
+    belts: list[BeltStatsState]
 
 
 class EventState(TimedMessage):
@@ -133,6 +156,8 @@ class SnapshotMessage(TimedMessage):
 
     type: Literal["snapshot"] = "snapshot"
     running: bool
+    # One entry per belt, in layout order.
+    belts: list[BeltState]
     baggage: list[BaggageState]
     stats: StatsState
     events: list[EventState]
@@ -170,6 +195,8 @@ def snapshot_message(engine: Engine, *, running: bool, after_event_id: int = 0) 
         tick=engine.tick,
         time_s=engine.time_s,
         running=running,
+        belts=[BeltState(id=belt_id, stopped=conveyor.stopped)
+               for belt_id, conveyor in engine.conveyors.items()],
         baggage=[BaggageState.model_validate(baggage, from_attributes=True)
                  for conveyor in engine.conveyors.values() for baggage in conveyor.baggage],
         stats=StatsState.model_validate(engine.stats(), from_attributes=True),

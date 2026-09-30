@@ -193,15 +193,11 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     }
   }
 
-  // Selects what was picked (or nothing); a bag also reports its destination.
+  // Selects what was picked, or nothing.
   function select(picked) {
     const same = picked?.kind === selection?.kind && picked?.id === selection?.id;
     if (same) return;
     selection = picked;
-    if (selection?.kind === 'bag') {
-      const baggage = drawnBags.find((bag) => bag.id === selection.id);
-      selection = { ...selection, destination_id: baggage?.destination_id ?? null };
-    }
     onSelect(selection);
   }
 

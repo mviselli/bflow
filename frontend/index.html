@@ -19,14 +19,20 @@
           <p id="connection" data-state="disconnected">Connecting…</p>
         </div>
         <p id="status" role="status">Initializing graphics…</p>
-        <div id="map">
-          <div class="map-tools" role="group" aria-label="View">
-            <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
-            <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
-            <button id="fit" type="button" aria-label="Show the whole plant">Fit</button>
+        <div class="plant">
+          <div id="map">
+            <div class="map-tools" role="group" aria-label="View">
+              <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+              <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+              <button id="fit" type="button" aria-label="Show the whole plant">Fit</button>
+            </div>
           </div>
+          <aside id="panel" aria-labelledby="panel-title" aria-live="polite">
+            <h3 id="panel-title">Details</h3>
+            <div id="panel-body"></div>
+          </aside>
         </div>
-        <p id="selection" aria-live="polite"></p>
+        <p id="hint">Scroll to zoom, drag to move the view, click a bag or a belt for its details; Esc clears the selection.</p>
         <dl id="counters" aria-label="Engine counters"></dl>
       </section>
     </main>

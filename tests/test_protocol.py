@@ -157,9 +157,9 @@ def test_initial_snapshot_is_empty_with_missing_mean():
 def test_snapshot_bags_match_the_belt_in_order():
     engine = run(Engine(), 400)
     snapshot = snapshot_message(engine, running=True)
-    assert [(b.id, b.conveyor_id, b.position_m, b.length_m, b.destination_id)
+    assert [(b.id, b.conveyor_id, b.position_m, b.length_m, b.destination_id, b.entered_at_s)
             for b in snapshot.baggage] == [
-        (b.id, b.conveyor_id, b.position_m, b.length_m, b.destination_id)
+        (b.id, b.conveyor_id, b.position_m, b.length_m, b.destination_id, b.entered_at_s)
         for b in engine.conveyors["belt-1"].baggage
     ]
     assert snapshot.baggage
@@ -168,8 +168,25 @@ def test_snapshot_bags_match_the_belt_in_order():
 def test_snapshot_stats_are_the_engine_stats():
     engine = run(Engine(), 600)
     stats = engine.stats()
-    expected = {name: getattr(stats, name) for name in StatsState.model_fields}
-    assert snapshot_message(engine, running=True).stats.model_dump() == expected
+    sent = snapshot_message(engine, running=True).stats.model_dump()
+    expected = {name: getattr(stats, name) for name in StatsState.model_fields if name != "belts"}
+    assert {name: value for name, value in sent.items() if name != "belts"} == expected
+    assert sent["belts"] == [
+        {"belt_id": belt.belt_id, "bags": belt.bags, "capacity": belt.capacity,
+         "occupancy": belt.occupancy}
+        for belt in stats.belts
+    ]
+
+
+def test_snapshot_has_every_belt_with_its_stop_and_occupancy_in_layout_order():
+    engine = run(Engine(default_layout()), 1200)
+    engine.stop_belt("line-2")
+    snapshot = snapshot_message(engine, running=False)
+    assert [(belt.id, belt.stopped) for belt in snapshot.belts] == [
+        (belt.id, belt.id == "line-2") for belt in engine.layout.belts]
+    line = next(belt for belt in snapshot.stats.belts if belt.belt_id == "line-1")
+    assert (line.bags, line.capacity) == (len(engine.conveyors["line-1"].baggage), 7)
+    assert line.occupancy == line.bags / 7
 
 
 def test_snapshot_carries_only_new_events():
