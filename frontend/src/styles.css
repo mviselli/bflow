@@ -14,7 +14,12 @@ h2 { margin: 0; font-size: 20px; }
 p { color: #aebfce; }
 .eyebrow { color: #75d7c0; margin-bottom: 8px; }
 section { margin-top: 32px; padding: 24px; border: 1px solid #304354; border-radius: 12px; }
-#status { margin-top: 8px; }
+/* Message over the map: connecting, connection lost, graphics unavailable. */
+#status {
+  position: absolute; z-index: 2; top: 12px; left: 50%; transform: translateX(-50%);
+  max-width: calc(100% - 24px); margin: 0; padding: 8px 16px; border-radius: 6px;
+  color: #0e1923; background: #f0a36b; font-weight: 600; text-align: center;
+}
 .plant { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; }
 @media (max-width: 900px) { .plant { grid-template-columns: minmax(0, 1fr); } }
 #map { position: relative; height: clamp(300px, 55vh, 560px); overflow: hidden; border-radius: 6px; }
@@ -53,6 +58,8 @@ canvas { display: block; touch-action: none; }
 .toolbar h2 { margin-right: auto; }
 .toolbar p { margin: 0; }
 #time { min-width: 21ch; text-align: right; font-variant-numeric: tabular-nums; color: #e8eef3; }
+/* Wide enough for the longest state, so the toolbar does not move when it changes. */
+#connection { min-width: 23ch; text-align: right; }
 #connection[data-state="connected"] { color: #75d7c0; }
 #connection[data-state="disconnected"] { color: #f0a36b; }
 #status:empty { display: none; }
@@ -72,11 +79,36 @@ button.warning { background: #f0a36b; }
 .speeds button:last-child { border-radius: 0 6px 6px 0; }
 .speeds button[aria-pressed="true"] { color: #0e1923; background: #75d7c0; border-color: #75d7c0; }
 .speeds button:disabled { color: #7d91a2; background: transparent; }
-/* Indicators between the toolbar and the map, so they stay in view with it. */
-#counters {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-  gap: 8px; margin: 0 0 12px;
+/* After the coloured variants, so a disabled button always looks disabled. */
+button.secondary:disabled, button.warning:disabled { color: #7d91a2; }
+button.warning:disabled { background: #304354; }
+/* Indicators under the map, in three groups of tiles. */
+.indicators { margin-top: 24px; }
+.indicators-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 12px; }
+.indicators-head h3 { margin: 0; font-size: 16px; }
+.indicators-head p { margin: 0; font-size: 14px; color: #f0a36b; }
+#counters { display: grid; grid-template-columns: 2fr 2fr 1fr; gap: 16px; }
+@media (max-width: 900px) { #counters { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { #counters { grid-template-columns: 1fr; } }
+.indicator-group { margin: 0; padding: 14px 16px 16px; border: 1px solid #304354; border-radius: 8px; background: #122130; }
+.indicator-group h4 {
+  margin: 0 0 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: #75d7c0;
 }
-#counters div { padding: 6px 10px; border: 1px solid #304354; border-radius: 6px; cursor: help; }
-#counters dt { font-size: 12px; color: #aebfce; white-space: nowrap; }
-#counters dd { margin: 0; font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.indicator-group dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.indicator-group[data-group="alarms"] dl { grid-template-columns: minmax(0, 1fr); }
+.indicator-group dl div {
+  padding: 10px 12px; border-radius: 6px; background: #0e1923; border-left: 3px solid #304354; cursor: help;
+}
+.indicator-group dt { font-size: 13px; color: #aebfce; }
+.indicator-group dd { margin: 0; }
+.indicator-group .value { margin: 2px 0; font-size: 26px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.indicator-group .caption { font-size: 12px; color: #7d91a2; }
+.indicator-group div[data-alert="warning"] { border-left-color: #f0a36b; }
+.indicator-group div[data-alert="warning"] .value { color: #f0a36b; }
+.indicator-group div[data-alert="error"] { border-left-color: #ff7a7a; }
+.indicator-group div[data-alert="error"] .value { color: #ff7a7a; }
+
+/* Connection lost: the last state received stays visible, dimmed. */
+body[data-connection="disconnected"] #counters,
+body[data-connection="disconnected"] #panel-body { opacity: 0.45; }

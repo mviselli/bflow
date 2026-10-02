@@ -37,6 +37,15 @@ export function plantBounds(layout) {
 
 // The camera: how much the view is magnified (1 = the whole plant fits) and
 // the map point shown at the centre of the screen (null = the plant's centre).
+// True when two layout messages describe the same plant, whatever the tick
+// they were sent at: after a reconnection to the same plant the page keeps
+// its view and the selected belt or desk.
+export function samePlant(a, b) {
+  if (!a || !b) return false;
+  const plant = ({ tick, time_s, ...rest }) => JSON.stringify(rest);
+  return plant(a) === plant(b);
+}
+
 export const FIT_CAMERA = { zoom: 1, centre: null };
 export const MAX_ZOOM = 6;
 

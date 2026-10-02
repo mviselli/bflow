@@ -8,6 +8,7 @@ import './styles.css';
 
 const map = document.querySelector('#map');
 const status = document.querySelector('#status');
+const indicatorsNote = document.querySelector('#indicators-note');
 const app = new Application();
 
 async function initialize() {
@@ -51,7 +52,13 @@ async function initialize() {
     onConnectionChange(connected) {
       controls.setConnected(connected);
       panel.setConnected(connected);
-      status.textContent = connected ? '' : 'Waiting for the simulation server…';
+      // Until the next connection, what is on screen is the last state received.
+      const lost = !connected && latest !== null;
+      document.body.dataset.connection = connected ? 'connected' : 'disconnected';
+      status.textContent = connected ? ''
+        : lost ? 'Connection lost · showing the last state received · reconnecting…'
+          : 'Waiting for the simulation server…';
+      indicatorsNote.textContent = lost ? 'Last values received before the connection was lost' : '';
     },
     onMessage(message) {
       if (message.type === 'layout') {
@@ -67,6 +74,12 @@ async function initialize() {
         showPanel();
       } else if (message.type === 'error') console.warn(message.message);
     },
+  });
+  // Timers of a hidden tab can be slowed down a lot: check the link as soon
+  // as the page is visible again. The picture then jumps to the newest state
+  // (see playback.js) instead of replaying what was missed.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') link.checkStale();
   });
 }
 

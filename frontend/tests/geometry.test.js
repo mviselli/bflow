@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   MAX_ZOOM, PLANT_MARGIN_M, baggagePlacement, beltAngle, beltEnds, clampCamera, jointPoint, panBy,
-  pickAt, plantBounds, plantGeometry, plantJoints, pointAlong, zoomAround,
+  pickAt, plantBounds, plantGeometry, plantJoints, pointAlong, samePlant, zoomAround,
 } from '../src/geometry.js';
 import { formatTime } from '../src/controls.js';
 
@@ -275,4 +275,13 @@ test('simulated time is shown as minutes and seconds', () => {
   assert.equal(formatTime(1.05), '00:01.05');
   assert.equal(formatTime(61.5), '01:01.50');
   assert.equal(formatTime(600), '10:00.00');
+});
+
+test('the same plant sent at another tick is the same plant; another layout is not', () => {
+  const sent = (layout, tick) => ({ type: 'layout', tick, time_s: tick * 0.05, ...layout });
+  assert.equal(samePlant(sent(PLANT, 0), sent(PLANT, 900)), true);
+  assert.equal(samePlant(sent(PLANT, 0), sent(CORNER, 0)), false);
+  const moved = { ...PLANT, outputs: [{ ...PLANT.outputs[0], label: 'BF 999' }, ...PLANT.outputs.slice(1)] };
+  assert.equal(samePlant(sent(PLANT, 0), sent(moved, 0)), false);
+  assert.equal(samePlant(null, sent(PLANT, 0)), false);
 });

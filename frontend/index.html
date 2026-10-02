@@ -24,10 +24,9 @@
           <p id="time" aria-live="off">00:00.00 · tick 0</p>
           <p id="connection" data-state="disconnected">Connecting…</p>
         </div>
-        <dl id="counters" aria-label="Engine indicators"></dl>
-        <p id="status" role="status">Initializing graphics…</p>
         <div class="plant">
           <div id="map">
+            <p id="status" role="status">Initializing graphics…</p>
             <div class="map-tools" role="group" aria-label="View">
               <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
               <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
@@ -41,6 +40,13 @@
           </aside>
         </div>
         <p id="hint">Scroll to zoom, drag to move the view, click a bag, a belt or a check-in desk for its details and commands; Esc clears the selection.</p>
+        <div class="indicators" aria-labelledby="indicators-title">
+          <div class="indicators-head">
+            <h3 id="indicators-title">Indicators</h3>
+            <p id="indicators-note"></p>
+          </div>
+          <div id="counters"></div>
+        </div>
       </section>
     </main>
     <script type="module" src="/src/main.js"></script>

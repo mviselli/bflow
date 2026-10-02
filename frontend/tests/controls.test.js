@@ -33,16 +33,25 @@ function stats(overrides = {}) {
   };
 }
 
-test('every engine indicator is shown, copied from the stats without computing', () => {
-  assert.deepEqual(indicators(stats()).map(({ name, value }) => [name, value]), [
-    ['Generated', '40'], ['Waiting', '3'], ['Admitted', '37'], ['In transit', '12'],
-    ['Delivered', '24'], ['Wrong exits', '1'], ['Mean time', '21.60 s'],
-    ['Throughput', '18 / 60 s'], ['Errors', '1'], ['Warnings', '2'],
+test('every engine indicator is shown in its group, copied from the stats without computing', () => {
+  assert.deepEqual(indicators(stats()).map(({ group, name, value }) => [group, name, value]), [
+    ['flow', 'Generated', '40'], ['flow', 'Waiting', '3'], ['flow', 'Admitted', '37'],
+    ['flow', 'In transit', '12'],
+    ['deliveries', 'Delivered', '24'], ['deliveries', 'Wrong exits', '1'],
+    ['deliveries', 'Throughput', '18'], ['deliveries', 'Mean travel time', '21.6 s'],
+    ['alarms', 'Errors', '1'], ['alarms', 'Warnings', '2'],
   ]);
 });
 
-test('without exited bags the mean time is a dash, and every indicator has a help text', () => {
+test('without exited bags the mean time is a dash, and every indicator has a caption and help', () => {
   const shown = indicators(stats({ mean_travel_time_s: null }));
   assert.equal(shown.find((item) => item.key === 'mean_travel_time_s').value, '—');
-  assert.ok(shown.every((item) => item.help.length > 0));
+  assert.ok(shown.every((item) => item.caption.length > 0 && item.help.length > 0));
+});
+
+test('wrong exits, warnings and errors call for attention only above zero', () => {
+  const alerts = (values) => Object.fromEntries(indicators(stats(values))
+    .filter((item) => item.alert).map((item) => [item.key, item.alert]));
+  assert.deepEqual(alerts({}), { misdelivered: 'warning', errors: 'error', warnings: 'warning' });
+  assert.deepEqual(alerts({ misdelivered: 0, errors: 0, warnings: 0, waiting: 9 }), {});
 });

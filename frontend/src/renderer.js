@@ -25,7 +25,7 @@ import {
 import {
   BAGGAGE_WIDTH_M, BELT_WIDTH_M, DESK_SPAN, FIT_CAMERA, baggagePlacement, beltAngle, beltEnds,
   clampCamera, panBy,
-  pickAt, plantGeometry, pointAlong, zoomAround,
+  pickAt, plantGeometry, pointAlong, samePlant, zoomAround,
 } from './geometry.js';
 import { destinationLooks, hashString, shortCode, suitcaseLook } from './looks.js';
 import { advanceSurface, createPlayback, isNewRun } from './playback.js';
@@ -338,8 +338,11 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   }
 
   return {
-    // A new layout arrives on every (re)connection: forget the old state.
+    // A new layout arrives on every (re)connection, with a full state after
+    // it: forget the old state. For the same plant, keep the view and a
+    // selected belt or desk; a bag may belong to an old run, so it goes.
     setLayout(newLayout) {
+      const keep = samePlant(layout, newLayout);
       layout = newLayout;
       belts = new Map(layout.belts.map((belt) => [belt.id, belt]));
       destinations = destinationLooks(layout.outputs);
@@ -350,10 +353,10 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       surfaceOffsets.clear();
       surfaceTime = null;
       newest = null;
-      camera = FIT_CAMERA;
+      if (!keep) camera = FIT_CAMERA;
       geometry = null;
       drawnBags = [];
-      select(null);
+      if (!keep || selection?.kind === 'bag') select(null);
     },
     zoomIn: () => zoomBy(1.5),
     zoomOut: () => zoomBy(1 / 1.5),

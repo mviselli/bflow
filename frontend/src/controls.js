@@ -1,35 +1,67 @@
-// Top bar: start/pause, reset and speed buttons, connection state,
-// simulated time, and the engine's indicators (KPIs) under it.
+// Top bar (start/pause, reset and speed buttons, connection state,
+// simulated time) and the engine's indicators (KPIs) under the map.
 //
 // The indicators are the engine's, copied from the snapshot as they are: the
 // page never computes its own version of the statistics, it only formats
 // them.
 
-// Key in the snapshot's stats, name and what it means (shown as a tooltip).
-// Generated stays next to Waiting and Admitted for the counter rules:
+// Indicators in three groups. Each one: key in the snapshot's stats, name,
+// a short caption shown under the value, and what it means (tooltip).
+// The counter rules read along the first two groups:
 // Generated = Admitted + Waiting; Admitted = Delivered + Wrong exits + In transit.
-const INDICATORS = [
-  ['generated', 'Generated', 'Bags created at the check-in desks'],
-  ['waiting', 'Waiting', 'Generated but not yet admitted: queued at the check-in desks'],
-  ['admitted', 'Admitted', 'Bags that entered the plant'],
-  ['in_transit', 'In transit', 'Admitted bags still in the plant, moving or stopped'],
-  ['correctly_delivered', 'Delivered', 'Bags that exited at their own destination'],
-  ['misdelivered', 'Wrong exits', 'Bags that exited at another destination'],
-  ['mean_travel_time_s', 'Mean time', 'Mean time from admission to exit, wrong exits included'],
-  ['throughput', 'Throughput', 'Correct deliveries in the last 60 simulated seconds'],
-  ['errors', 'Errors', 'Error occurrences since the start of the run'],
-  ['warnings', 'Warnings', 'Warning occurrences since the start of the run'],
+export const INDICATOR_GROUPS = [
+  {
+    id: 'flow',
+    title: 'Bag flow',
+    items: [
+      ['generated', 'Generated', 'at the desks', 'Bags created at the check-in desks'],
+      ['waiting', 'Waiting', 'queued at the desks', 'Generated but not yet admitted into the plant'],
+      ['admitted', 'Admitted', 'entered the plant', 'Bags that entered the plant'],
+      ['in_transit', 'In transit', 'on the belts', 'Admitted bags still in the plant, moving or stopped'],
+    ],
+  },
+  {
+    id: 'deliveries',
+    title: 'Deliveries',
+    items: [
+      ['correctly_delivered', 'Delivered', 'at their own exit', 'Bags that exited at their own destination'],
+      ['misdelivered', 'Wrong exits', 'at another exit', 'Bags that exited at another destination'],
+      ['throughput', 'Throughput', 'delivered in the last 60 s',
+        'Correct deliveries in the last 60 simulated seconds'],
+      ['mean_travel_time_s', 'Mean travel time', 'admission to exit',
+        'Mean time from admission to exit of every exited bag, wrong exits included'],
+    ],
+  },
+  {
+    id: 'alarms',
+    title: 'Alarms',
+    items: [
+      ['errors', 'Errors', 'since the start', 'Error occurrences since the start of the run'],
+      ['warnings', 'Warnings', 'since the start', 'Warning occurrences since the start of the run'],
+    ],
+  },
 ];
 
-// The indicators of a snapshot's stats as { key, name, help, value } with
-// value as text, in display order.
+// Indicators that call for attention when above zero.
+const ALERTS = { misdelivered: 'warning', warnings: 'warning', errors: 'error' };
+
+// The indicators of a snapshot's stats, in display order, as
+// { group, key, name, caption, help, value, alert } with value as text and
+// alert 'warning', 'error' or null.
 export function indicators(stats) {
-  return INDICATORS.map(([key, name, help]) => ({ key, name, help, value: formatIndicator(key, stats[key]) }));
+  return INDICATOR_GROUPS.flatMap((group) => group.items.map(([key, name, caption, help]) => ({
+    group: group.id,
+    key,
+    name,
+    caption,
+    help,
+    value: formatIndicator(key, stats[key]),
+    alert: ALERTS[key] && stats[key] > 0 ? ALERTS[key] : null,
+  })));
 }
 
 function formatIndicator(key, value) {
-  if (key === 'mean_travel_time_s') return value === null ? '—' : `${value.toFixed(2)} s`;
-  if (key === 'throughput') return `${value} / 60 s`;
+  if (key === 'mean_travel_time_s') return value === null ? '—' : `${value.toFixed(1)} s`;
   return String(value);
 }
 
@@ -60,17 +92,34 @@ export function createControls({ onCommand }) {
   const time = document.querySelector('#time');
   const counters = document.querySelector('#counters');
 
+  // One tile per indicator: name, value and caption, grouped.
   const values = {};
-  for (const [key, name, help] of INDICATORS) {
-    const item = document.createElement('div');
-    const term = document.createElement('dt');
-    const value = document.createElement('dd');
-    item.title = help;
-    term.textContent = name;
-    value.textContent = '—';
-    item.append(term, value);
-    counters.append(item);
-    values[key] = value;
+  const tiles = {};
+  for (const group of INDICATOR_GROUPS) {
+    const section = document.createElement('section');
+    section.className = 'indicator-group';
+    section.dataset.group = group.id;
+    const heading = document.createElement('h4');
+    heading.textContent = group.title;
+    const list = document.createElement('dl');
+    for (const [key, name, caption, help] of group.items) {
+      const tile = document.createElement('div');
+      const term = document.createElement('dt');
+      const value = document.createElement('dd');
+      const note = document.createElement('dd');
+      tile.title = help;
+      term.textContent = name;
+      value.className = 'value';
+      value.textContent = '—';
+      note.className = 'caption';
+      note.textContent = caption;
+      tile.append(term, value, note);
+      list.append(tile);
+      values[key] = value;
+      tiles[key] = tile;
+    }
+    section.append(heading, list);
+    counters.append(section);
   }
 
   let running = false;
@@ -108,7 +157,11 @@ export function createControls({ onCommand }) {
       for (const speed of speeds) {
         speed.setAttribute('aria-pressed', String(Number(speed.dataset.speed) === snapshot.speed));
       }
-      for (const { key, value } of indicators(snapshot.stats)) values[key].textContent = value;
+      for (const { key, value, alert } of indicators(snapshot.stats)) {
+        values[key].textContent = value;
+        if (alert) tiles[key].dataset.alert = alert;
+        else delete tiles[key].dataset.alert;
+      }
     },
   };
 }
