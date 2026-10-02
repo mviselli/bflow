@@ -147,17 +147,22 @@ Pause near each time and compare (the counter rules must hold exactly):
 
 ## 7. Arrival rate
 
-- [ ] Select desk A1 and drag the slider to `1.00`, then release: the panel
-      shows `1.00 bags/s · 60 per min` and bags leave A1 much more often.
-- [ ] After about a minute A1 has about 20 bags waiting (its **Waiting** row
-      and the **Waiting** indicator grow); the other desks stay at 0.
+Click **Reset**, then **Start** at 1× (the values below are for a fresh run;
+with belts already full the queue grows faster and takes longer to clear).
+
+- [ ] At about `00:10`, select desk A1, drag the slider to `1.00` and
+      release: the panel shows `1.00 bags/s · 60 per min` and bags leave A1
+      much more often.
+- [ ] At about `01:10` A1 has about 21 bags waiting: its **Waiting** row
+      and the **Waiting** indicator show the same number (the other desks
+      stay at 0).
 - [ ] Drag the slider to `0`: no new bag appears at A1 and its queue
-      empties within about a minute.
+      empties in about 50 simulated seconds.
 
 ## 8. Reset
 
-Do this after checks 6 and 7, at 5×, with a belt stopped, a desk rate
-changed and a bag selected.
+Do this after check 7, at 5×, with a belt stopped, a desk rate changed and
+a bag selected.
 
 - [ ] Click **Reset**: the map is empty at once, the time reads
       `00:00.00 · tick 0`, the button reads **Start**, every indicator is
@@ -197,3 +202,4 @@ changed and a bag selected.
 | ---- | ------- | ------ | ------------------ |
 | 2026-09-26 (one-belt page, earlier version of this list) | Chrome (desktop, driven by Claude) | All checks passed (hidden tab checked by the user) | The Start/Pause button moved sideways whenever the tick gained a digit: the time label now has a fixed minimum width. The browser automation could not hide the tab, so the user ran that check. |
 | 2026-09-28 (one-belt page, earlier version of this list) | Chrome (desktop, driven by Claude) | Checks 1–6 passed after the engine gained the merge, sorter, belt stop and new statistics: first delivery at `00:11.45 · tick 229` with 9.45 s; paused at tick 602 with 15 / 0 / 15 / 5 / 10 / 0; picture and counters unchanged while paused; resume without a jump; five quick toggles left it paused; server stop and restart; reload while running. No counter rule broken over 769 updates, no console errors | None. The hidden-tab check was not repeated (the automation cannot hide the tab; nothing in the page changed since the last run). |
+| 2026-10-02 | Chrome (desktop, driven by Claude), single process on :8000 | Checks 1–9 passed except the hidden tab (pending, needs the user). Exact matches with the reference values: first bags at `00:06.70` (6), first delivery 21.6 s, rows at ticks 601, 1200 and 2400 equal to the table; counter rules held on all 1,804 updates of the first run; 31 bags counted on the map at tick 2400 = In transit; speeds measured 1.00 / 2.00 / 4.99 simulated s per real s; bag-202 followed across five belts to BF 101; branch-2 stopped at tick 598 → 43 in transit and 11 delivered at `01:00`, desks waiting from `01:26.70`, queue cleared 8.1 s after the restart; A1 at 1 bag/s → 20 waiting at `01:10`, drained in 50.3 s; Reset at 5× cleared plant, indicators and bag selection, restored branch-2 and A1, kept 5×; Start right after Reset started bag-1…6; server stop/restart and reload as described; no console errors | Check 7 first ran after check 6 on a busy plant (42 waiting, 117 s to drain, confirmed equal to an engine replay of `/api/commands`): it now starts with a Reset, and its reference values are for a fresh run. Not judged by the automation: smoothness by eye at 5× and a stopped belt's surface standing still (covered by unit tests). |
