@@ -34,7 +34,11 @@ npm --prefix frontend run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Use **Start**, **Pause**
 and **Resume**, **Reset** to start again from the beginning, and **1×**, **2×**
-or **5×** to change the speed; the counters come from the engine. Scroll over
+or **5×** to change the speed. The indicators above the map come from the
+engine: bags generated, waiting at the desks, admitted, in transit, delivered
+and sent to a wrong exit, mean travel time, throughput (correct deliveries in
+the last 60 simulated seconds), errors and warnings; hover over one for its
+meaning. Scroll over
 the map to zoom, drag to move the view and use **Fit** to see the whole plant
 again. Click a bag, a belt or a check-in desk to see its details in the side panel
 (a belt's state and occupancy, a bag's destination, position and travel time,

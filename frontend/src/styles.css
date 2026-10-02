@@ -72,10 +72,11 @@ button.warning { background: #f0a36b; }
 .speeds button:last-child { border-radius: 0 6px 6px 0; }
 .speeds button[aria-pressed="true"] { color: #0e1923; background: #75d7c0; border-color: #75d7c0; }
 .speeds button:disabled { color: #7d91a2; background: transparent; }
+/* Indicators between the toolbar and the map, so they stay in view with it. */
 #counters {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 12px; margin: 16px 0 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px; margin: 0 0 12px;
 }
-#counters div { padding: 8px 12px; border: 1px solid #304354; border-radius: 6px; }
-#counters dt { font-size: 13px; color: #aebfce; }
-#counters dd { margin: 0; font-size: 20px; font-variant-numeric: tabular-nums; }
+#counters div { padding: 6px 10px; border: 1px solid #304354; border-radius: 6px; cursor: help; }
+#counters dt { font-size: 12px; color: #aebfce; white-space: nowrap; }
+#counters dd { margin: 0; font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }

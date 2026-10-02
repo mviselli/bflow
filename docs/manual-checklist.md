@@ -29,7 +29,7 @@ The reference values below are for the default configuration: a 10 m belt at
 These must hold every time you look at the counters, running or paused:
 
 - **Generated = Admitted + Waiting**
-- **Admitted = Delivered + Misdelivered + In transit**
+- **Admitted = Delivered + Wrong exits + In transit**
 
 The page copies the counters from the server without computing anything, so
 a mismatch points to the engine or to the message, not to the page.
@@ -88,7 +88,7 @@ drawn yet, or one that is still fading out at the output.
 Pause at a few moments (for example around `00:30` and `01:00`) and check:
 
 - [ ] The counter rules hold.
-- [ ] **Waiting** is `0` and **Misdelivered** is `0` (the belt has room for
+- [ ] **Waiting** is `0` and **Wrong exits** is `0` (the belt has room for
       every bag, and there is only one output).
 - [ ] After the first delivery, **In transit** stays at 4–5, and the number
       of bags drawn on the belt matches it (allowing for the 0.15 s lag).

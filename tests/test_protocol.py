@@ -190,6 +190,7 @@ def test_snapshot_bags_match_the_belt_in_order():
 def test_snapshot_stats_are_the_engine_stats():
     engine = run(Engine(), 600)
     stats = engine.stats()
+    assert stats.throughput > 0  # a non-trivial value to compare
     sent = snapshot_message(engine, running=True).stats.model_dump()
     lists = {"belts", "inputs"}
     expected = {name: getattr(stats, name) for name in StatsState.model_fields if name not in lists}

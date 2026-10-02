@@ -155,6 +155,8 @@ class StatsState(Message):
     mean_travel_time_s: float | None = Field(ge=0)
     errors: int = Field(ge=0)
     warnings: int = Field(ge=0)
+    # Correct deliveries in the last 60 simulated seconds.
+    throughput: int = Field(ge=0)
     # One entry per belt and per input, in layout order.
     belts: list[BeltStatsState]
     inputs: list[InputStatsState]

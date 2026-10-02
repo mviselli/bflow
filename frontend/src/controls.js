@@ -1,17 +1,37 @@
 // Top bar: start/pause, reset and speed buttons, connection state,
-// simulated time and counters.
+// simulated time, and the engine's indicators (KPIs) under it.
 //
-// The counters are the engine's, copied from the snapshot as they are: the
-// page never computes its own version of the statistics.
+// The indicators are the engine's, copied from the snapshot as they are: the
+// page never computes its own version of the statistics, it only formats
+// them.
 
-const COUNTERS = [
-  ['generated', 'Generated'],
-  ['waiting', 'Waiting'],
-  ['admitted', 'Admitted'],
-  ['in_transit', 'In transit'],
-  ['correctly_delivered', 'Delivered'],
-  ['misdelivered', 'Misdelivered'],
+// Key in the snapshot's stats, name and what it means (shown as a tooltip).
+// Generated stays next to Waiting and Admitted for the counter rules:
+// Generated = Admitted + Waiting; Admitted = Delivered + Wrong exits + In transit.
+const INDICATORS = [
+  ['generated', 'Generated', 'Bags created at the check-in desks'],
+  ['waiting', 'Waiting', 'Generated but not yet admitted: queued at the check-in desks'],
+  ['admitted', 'Admitted', 'Bags that entered the plant'],
+  ['in_transit', 'In transit', 'Admitted bags still in the plant, moving or stopped'],
+  ['correctly_delivered', 'Delivered', 'Bags that exited at their own destination'],
+  ['misdelivered', 'Wrong exits', 'Bags that exited at another destination'],
+  ['mean_travel_time_s', 'Mean time', 'Mean time from admission to exit, wrong exits included'],
+  ['throughput', 'Throughput', 'Correct deliveries in the last 60 simulated seconds'],
+  ['errors', 'Errors', 'Error occurrences since the start of the run'],
+  ['warnings', 'Warnings', 'Warning occurrences since the start of the run'],
 ];
+
+// The indicators of a snapshot's stats as { key, name, help, value } with
+// value as text, in display order.
+export function indicators(stats) {
+  return INDICATORS.map(([key, name, help]) => ({ key, name, help, value: formatIndicator(key, stats[key]) }));
+}
+
+function formatIndicator(key, value) {
+  if (key === 'mean_travel_time_s') return value === null ? '—' : `${value.toFixed(2)} s`;
+  if (key === 'throughput') return `${value} / 60 s`;
+  return String(value);
+}
 
 export function formatTime(seconds) {
   const minutes = Math.floor(seconds / 60);
@@ -41,10 +61,11 @@ export function createControls({ onCommand }) {
   const counters = document.querySelector('#counters');
 
   const values = {};
-  for (const [key, name] of [...COUNTERS, ['mean_travel_time_s', 'Mean time']]) {
+  for (const [key, name, help] of INDICATORS) {
     const item = document.createElement('div');
     const term = document.createElement('dt');
     const value = document.createElement('dd');
+    item.title = help;
     term.textContent = name;
     value.textContent = '—';
     item.append(term, value);
@@ -87,9 +108,7 @@ export function createControls({ onCommand }) {
       for (const speed of speeds) {
         speed.setAttribute('aria-pressed', String(Number(speed.dataset.speed) === snapshot.speed));
       }
-      for (const [key] of COUNTERS) values[key].textContent = snapshot.stats[key];
-      const mean = snapshot.stats.mean_travel_time_s;
-      values.mean_travel_time_s.textContent = mean === null ? '—' : `${mean.toFixed(2)} s`;
+      for (const { key, value } of indicators(snapshot.stats)) values[key].textContent = value;
     },
   };
 }
