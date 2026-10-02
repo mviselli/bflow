@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  DISPLAY_DELAY_S, MAX_DRIFT_S, advanceSurface, createPlayback, interpolateBaggage, isNextBelt,
+  DISPLAY_DELAY_S, MAX_DRIFT_S, advanceSurface, createPlayback, interpolateBaggage, isNewRun, isNextBelt,
 } from '../src/playback.js';
 
 const STEP_S = 0.05;
@@ -85,6 +85,28 @@ test('an older tick (a restarted server) starts over', () => {
   playback.add(snapshot(3, [bag('B9', 0.1)]), 1);
   assert.equal(playback.advance(1), 3 * STEP_S);
   assert.deepEqual(playback.baggageAt(3 * STEP_S).map((baggage) => baggage.id), ['B9']);
+});
+
+test('a new run (a reset) starts over even when the tick does not go back', () => {
+  const playback = createPlayback();
+  // Run 1 at tick 4; the reset and a quick start reach tick 10 by the next snapshot.
+  playback.add({ ...snapshot(2, [bag('B1', 0.1)]), run: 1 }, 0);
+  playback.add({ ...snapshot(4, [bag('B1', 0.2)]), run: 1 }, 0.1);
+  playback.advance(0.1);
+  playback.add({ ...snapshot(10, [bag('B1', 0.4)]), run: 2 }, 0.2);
+  // Nothing of run 1 is left: no slide of bag B1 from its old position.
+  assert.equal(playback.advance(0.2), 10 * STEP_S);
+  assert.deepEqual(playback.baggageAt(10 * STEP_S).map((b) => [b.id, b.position_m, b.alpha]),
+    [['B1', 0.4, 1]]);
+  assert.deepEqual(playback.baggageAt(3 * STEP_S).map((b) => b.position_m), [0.4]);
+});
+
+test('a snapshot belongs to a new run when its run number changes or its tick goes back', () => {
+  assert.equal(isNewRun({ run: 1, tick: 40 }, { run: 1, tick: 42 }), false);
+  assert.equal(isNewRun({ run: 1, tick: 40 }, { run: 1, tick: 40 }), false);
+  assert.equal(isNewRun({ run: 1, tick: 0 }, { run: 2, tick: 0 }), true);
+  assert.equal(isNewRun({ run: 1, tick: 40 }, { run: 2, tick: 60 }), true);
+  assert.equal(isNewRun({ run: 3, tick: 40 }, { run: 3, tick: 2 }), true);
 });
 
 test('bags are drawn between the positions of the two snapshots around the time', () => {

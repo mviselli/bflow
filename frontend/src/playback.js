@@ -71,9 +71,9 @@ export function createPlayback() {
 
     // Stores a snapshot received at the real time nowS (seconds).
     add(snapshot, nowS) {
-      // The server's time never goes back; if it does (a restarted server),
-      // the old snapshots describe another run: start over.
-      if (snapshots.length > 0 && snapshot.tick < newest().tick) reset();
+      // A new run (a reset) or time going back (a restarted server): the old
+      // snapshots describe another run, never to be mixed with this one.
+      if (snapshots.length > 0 && isNewRun(newest(), snapshot)) reset();
       const latest = newest();
       if (latest && snapshot.tick === latest.tick) snapshots[snapshots.length - 1] = snapshot;
       else {
@@ -123,6 +123,14 @@ export function createPlayback() {
       return interpolateBaggage(previous.baggage, next.baggage, fraction, belts);
     },
   };
+}
+
+// True when `snapshot` does not continue the run of `previous`: the server
+// numbers its runs and starts a new one at every reset, even when the tick
+// does not go back (a reset at tick 0, or a run that already passed the old
+// tick when the next snapshot was sent).
+export function isNewRun(previous, snapshot) {
+  return snapshot.run !== previous.run || snapshot.tick < previous.tick;
 }
 
 // True when a bag can pass from belt `from` straight onto belt `to`: `to`

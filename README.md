@@ -42,6 +42,11 @@ a desk's queue and arrival rate). From the panel you can stop and restart a
 belt, or change how many bags arrive at a desk. `Esc` clears the selection. Stop
 both servers with `Ctrl+C`.
 
+The server records every command with the simulation step it was applied at.
+[http://127.0.0.1:8000/api/commands](http://127.0.0.1:8000/api/commands) lists
+the commands of the current run (a reset starts a new one): the same seed and
+the same commands at the same steps always give the same run, at any speed.
+
 ## Run from the command line
 
 ```sh

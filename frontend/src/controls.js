@@ -19,6 +19,19 @@ export function formatTime(seconds) {
   return `${String(minutes).padStart(2, '0')}:${rest}`;
 }
 
+// What the start/pause button shows for a snapshot. After a click on Reset
+// the server is about to start a new, paused run, but snapshots of the old
+// run (still running) can arrive in between: until a snapshot of another
+// run arrives (`resetFromRun` is the run reset), the button stays on Start,
+// so a click right after Reset starts the new run instead of pausing it.
+export function toggleState(snapshot, resetFromRun = null) {
+  if (resetFromRun !== null && snapshot.run === resetFromRun) {
+    return { running: false, label: 'Start' };
+  }
+  const running = snapshot.running;
+  return { running, label: running ? 'Pause' : snapshot.tick === 0 ? 'Start' : 'Resume' };
+}
+
 export function createControls({ onCommand }) {
   const button = document.querySelector('#toggle');
   const reset = document.querySelector('#reset');
@@ -40,8 +53,20 @@ export function createControls({ onCommand }) {
   }
 
   let running = false;
+  let run = null;           // run of the newest snapshot
+  let resetFromRun = null;  // run being reset, until a snapshot of the new one arrives
+  function showToggle(state) {
+    running = state.running;
+    button.textContent = state.label;
+  }
   button.addEventListener('click', () => onCommand({ type: running ? 'pause' : 'start' }));
-  reset.addEventListener('click', () => onCommand({ type: 'reset' }));
+  reset.addEventListener('click', () => {
+    onCommand({ type: 'reset' });
+    if (run !== null) {
+      resetFromRun = run;
+      showToggle({ running: false, label: 'Start' });
+    }
+  });
   for (const speed of speeds) {
     speed.addEventListener('click', () => onCommand({ type: 'set_speed', speed: Number(speed.dataset.speed) }));
   }
@@ -51,10 +76,13 @@ export function createControls({ onCommand }) {
       for (const control of [button, reset, ...speeds]) control.disabled = !connected;
       connection.textContent = connected ? 'Connected' : 'Disconnected · retrying…';
       connection.dataset.state = connected ? 'connected' : 'disconnected';
+      // A reset sent on a lost connection may never be applied.
+      if (!connected) resetFromRun = null;
     },
     setSnapshot(snapshot) {
-      running = snapshot.running;
-      button.textContent = running ? 'Pause' : snapshot.tick === 0 ? 'Start' : 'Resume';
+      if (snapshot.run !== resetFromRun) resetFromRun = null;
+      run = snapshot.run;
+      showToggle(toggleState(snapshot, resetFromRun));
       time.textContent = `${formatTime(snapshot.time_s)} · tick ${snapshot.tick}`;
       for (const speed of speeds) {
         speed.setAttribute('aria-pressed', String(Number(speed.dataset.speed) === snapshot.speed));

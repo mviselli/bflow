@@ -28,7 +28,7 @@ import {
   pickAt, plantGeometry, pointAlong, zoomAround,
 } from './geometry.js';
 import { destinationLooks, hashString, shortCode, suitcaseLook } from './looks.js';
-import { advanceSurface, createPlayback } from './playback.js';
+import { advanceSurface, createPlayback, isNewRun } from './playback.js';
 
 // Real time in seconds, for the display clock.
 function nowSeconds() {
@@ -79,7 +79,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   let desks = [];                 // { id, belt } for each input and the belt it feeds
   let selection = null;           // { kind: 'bag' | 'input' | 'belt', id } or null
   let stoppedBelts = new Set();   // belts stopped by the operator, from the newest snapshot
-  let newestTick = null;
+  let newest = null;              // the newest snapshot
   const surfaceOffsets = new Map(); // belt id → offset of its surface in metres
   let surfaceTime = null;         // simulated time the surfaces were last moved to
   let resolution = 1;
@@ -349,7 +349,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       playback.reset();
       surfaceOffsets.clear();
       surfaceTime = null;
-      newestTick = null;
+      newest = null;
       camera = FIT_CAMERA;
       geometry = null;
       drawnBags = [];
@@ -361,10 +361,15 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     fit: () => layout && setCamera(FIT_CAMERA),
     clearSelection: () => select(null),
     setSnapshot(snapshot) {
-      // Time going back means a reset: bag ids start again from bag-1, so a
-      // selected bag would become another one.
-      if (newestTick !== null && snapshot.tick < newestTick && selection?.kind === 'bag') select(null);
-      newestTick = snapshot.tick;
+      // A new run (a reset): nothing of the old run may stay on screen. Bag
+      // ids start again from bag-1, so a selected bag would become another
+      // one, and the surfaces start again from 0.
+      if (newest && isNewRun(newest, snapshot)) {
+        if (selection?.kind === 'bag') select(null);
+        surfaceOffsets.clear();
+        surfaceTime = null;
+      }
+      newest = snapshot;
       stoppedBelts = new Set(snapshot.belts.filter((belt) => belt.stopped).map((belt) => belt.id));
       playback.add(snapshot, nowSeconds());
     },

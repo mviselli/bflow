@@ -9,6 +9,7 @@ from bflow.core.engine import STEP_MS, Engine
 from bflow.core.events import Severity
 from bflow.core.layout import default_layout, minimal_layout
 from bflow.server.protocol import (
+    CommandRecord,
     ErrorMessage,
     ResetCommand,
     RestartBeltCommand,
@@ -247,3 +248,21 @@ def test_snapshot_has_the_speed_and_every_input_rate():
     assert snapshot.speed == 5
     assert [(node.id, node.arrival_rate_bags_s) for node in snapshot.inputs] == [
         (node.id, 0.4 if node.id == "input-b2" else 0.15) for node in engine.layout.inputs]
+
+
+def test_snapshot_has_the_run_number():
+    assert snapshot_message(Engine(), running=False).run == 1
+    assert snapshot_message(Engine(), running=False, run=3).run == 3
+    with pytest.raises(ValidationError):
+        SnapshotMessage.model_validate({**snapshot_message(Engine(), running=False).model_dump(), "run": 0})
+
+
+def test_command_record_round_trips_through_json():
+    record = CommandRecord(tick=40, time_s=2.0,
+                           command=SetRateCommand(type="set_rate", input_id="input-a1", rate_bags_s=0.5))
+    data = json.loads(record.model_dump_json())
+    assert data == {"tick": 40, "time_s": 2.0,
+                    "command": {"type": "set_rate", "input_id": "input-a1", "rate_bags_s": 0.5}}
+    assert CommandRecord.model_validate(data) == record
+    with pytest.raises(ValidationError):
+        CommandRecord(tick=40, time_s=1.0, command=record.command)

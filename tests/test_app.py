@@ -74,7 +74,7 @@ def test_app_starts_stopped_at_tick_zero():
         clock.now += 5
         settle()
         assert client.get("/api/status").json() == {
-            "tick": 0, "time_s": 0.0, "running": False, "speed": 1}
+            "tick": 0, "time_s": 0.0, "running": False, "speed": 1, "run": 1}
 
 
 def test_start_pause_and_resume_through_the_websocket():
@@ -240,6 +240,36 @@ def test_after_a_reset_the_new_engine_events_reach_an_open_connection():
         # Event ids start again from 1 and the connection still sends them.
         after = receive_until(ws, lambda m: m["type"] == "snapshot" and m["events"])
         assert after["events"][0]["id"] == 1
+
+
+def test_snapshots_carry_the_run_number_which_changes_at_every_reset():
+    app, _, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        assert receive_until(ws, is_snapshot(0, False))["run"] == 1
+        # Still tick 0 and paused: only the run number tells the new run apart.
+        ws.send_text('{"type": "reset"}')
+        receive_until(ws, lambda m: m["type"] == "snapshot" and m["run"] == 2)
+        wait_for_status(client, {"run": 2, "tick": 0})
+
+
+def test_the_commands_of_the_current_run_can_be_read_with_their_ticks():
+    app, _, clock = make_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        ws.send_text('{"type": "start"}')
+        wait_for_status(client, {"running": True})
+        clock.now += 0.5
+        wait_for_status(client, {"tick": 10})
+        ws.send_text('{"type": "stop_belt", "belt_id": "line-1"}')
+        receive_until(ws, lambda m: m["type"] == "snapshot"
+                      and any(belt["stopped"] for belt in m["belts"]))
+        assert client.get("/api/commands").json() == [
+            {"tick": 0, "time_s": 0.0, "command": {"type": "start"}},
+            {"tick": 10, "time_s": 0.5, "command": {"type": "stop_belt", "belt_id": "line-1"}},
+        ]
+        ws.send_text('{"type": "reset"}')
+        wait_for_status(client, {"run": 2})
+        assert client.get("/api/commands").json() == [
+            {"tick": 0, "time_s": 0.0, "command": {"type": "reset"}}]
 
 
 def test_snapshots_arrive_at_about_twelve_per_second():

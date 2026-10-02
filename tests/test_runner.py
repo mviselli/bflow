@@ -11,7 +11,7 @@ from bflow.server.protocol import (
     PauseCommand, ResetCommand, RestartBeltCommand, SetRateCommand, SetSpeedCommand, StartCommand,
     StopBeltCommand,
 )
-from bflow.server.runner import MAX_TICKS_PER_UPDATE, Runner
+from bflow.server.runner import MAX_RECORDED_COMMANDS, MAX_TICKS_PER_UPDATE, Runner, apply_to_engine
 
 
 START = StartCommand(type="start")
@@ -259,3 +259,93 @@ def test_commands_for_elements_not_in_the_plant_are_refused_at_once(command):
     with pytest.raises(ValueError, match="Unknown"):
         runner.submit(command)
     assert runner.commands.empty()
+
+
+def recorded(runner):
+    return [(record.tick, record.command.type) for record in runner.record]
+
+
+def test_each_applied_command_is_recorded_with_the_tick_it_was_applied_at():
+    runner, clock = make_runner()
+    stop = StopBeltCommand(type="stop_belt", belt_id="line-1")
+    runner.submit(stop)  # while paused, at tick 0
+    runner.submit(START)
+    runner.update()
+    assert recorded(runner) == [(0, "stop_belt"), (0, "start")]
+    clock.now += 0.5  # 10 ticks
+    runner.update()
+    runner.submit(speed(5))
+    runner.submit(START)  # already running: recorded, changes nothing
+    runner.update()
+    clock.now += 0.1  # 10 more ticks at 5×
+    runner.update()
+    runner.submit(PAUSE)
+    runner.update()
+    assert recorded(runner) == [(0, "stop_belt"), (0, "start"), (10, "set_speed"), (10, "start"),
+                                (20, "pause")]
+    assert runner.record[0].command == stop
+    assert runner.record[-1].time_s == 1.0
+    # Submitted but not yet applied: not in the record.
+    runner.submit(START)
+    assert len(runner.record) == 5
+
+
+def test_reset_starts_a_new_run_whose_record_begins_with_the_reset():
+    runner, clock = make_runner()
+    assert runner.run_number == 1
+    runner.submit(START)
+    runner.update()
+    clock.now += 1
+    runner.update()
+    runner.submit(ResetCommand(type="reset"))
+    runner.submit(StopBeltCommand(type="stop_belt", belt_id="line-2"))
+    runner.update()
+    assert runner.run_number == 2
+    assert recorded(runner) == [(0, "reset"), (0, "stop_belt")]
+    assert runner.engine.conveyors["line-2"].stopped
+    runner.submit(ResetCommand(type="reset"))
+    runner.update()
+    assert runner.run_number == 3
+    assert recorded(runner) == [(0, "reset")]
+    assert not runner.engine.conveyors["line-2"].stopped
+
+
+def test_the_record_keeps_only_the_newest_commands():
+    runner, _ = make_runner()
+    for _ in range(MAX_RECORDED_COMMANDS + 5):
+        runner.submit(PAUSE)
+    runner.update()
+    assert len(runner.record) == MAX_RECORDED_COMMANDS
+
+
+def test_replaying_the_record_at_the_same_ticks_gives_the_same_run():
+    # The operator acts at uneven real times, at 5×, pausing in between;
+    # a new engine stepped directly with the recorded commands ends equal.
+    runner, clock = make_runner()
+    runner.submit(speed(5))
+    runner.submit(START)
+    runner.update()
+    actions = [StopBeltCommand(type="stop_belt", belt_id="branch-1"),
+               SetRateCommand(type="set_rate", input_id="input-b1", rate_bags_s=0.8),
+               PAUSE,
+               RestartBeltCommand(type="restart_belt", belt_id="branch-1"),
+               START,
+               SetRateCommand(type="set_rate", input_id="input-a2", rate_bags_s=0.0)]
+    for step in range(400):
+        clock.now += 0.013 + (step % 7) * 0.004
+        if step % 60 == 30 and actions:
+            runner.submit(actions.pop(0))
+        runner.update()
+    assert not actions
+
+    replay = Engine(default_layout())
+    commands = list(runner.record)
+    while replay.tick < runner.engine.tick:
+        while commands and commands[0].tick == replay.tick:
+            apply_to_engine(replay, commands.pop(0).command)
+        replay.step()
+    assert not commands
+    assert replay.stats() == runner.engine.stats()
+    assert replay.events.counts == runner.engine.events.counts
+    assert [(b.id, b.conveyor_id, b.position_m) for c in replay.conveyors.values() for b in c.baggage] \
+        == [(b.id, b.conveyor_id, b.position_m) for c in runner.engine.conveyors.values() for b in c.baggage]

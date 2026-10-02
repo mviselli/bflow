@@ -25,7 +25,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from bflow.server.protocol import ErrorMessage, layout_message, parse_command, snapshot_message
+from bflow.server.protocol import (
+    CommandRecord, ErrorMessage, layout_message, parse_command, snapshot_message,
+)
 from bflow.server.runner import Runner
 
 
@@ -58,7 +60,14 @@ def create_app(runner: Runner | None = None) -> FastAPI:
             "time_s": runner.engine.time_s,
             "running": runner.running,
             "speed": runner.speed,
+            "run": runner.run_number,
         }
+
+    # The commands applied in the current run, each with its tick: replayed
+    # at the same ticks on a new engine they give the same run.
+    @app.get("/api/commands")
+    async def commands() -> list[CommandRecord]:
+        return list(runner.record)
 
     @app.websocket("/ws")
     async def websocket(websocket: WebSocket) -> None:
@@ -87,7 +96,7 @@ async def _send_snapshots(websocket: WebSocket, runner: Runner) -> None:
             engine = runner.engine
             last_event_id = 0
         snapshot = snapshot_message(engine, running=runner.running, speed=runner.speed,
-                                    after_event_id=last_event_id)
+                                    run=runner.run_number, after_event_id=last_event_id)
         await websocket.send_text(snapshot.model_dump_json())
         if snapshot.events:
             last_event_id = snapshot.events[-1].id

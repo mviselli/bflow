@@ -11,7 +11,8 @@ The browser sends commands: ``start``, ``pause``, ``reset``, ``set_speed``,
 ``set_rate``, ``stop_belt`` and ``restart_belt``. parse_command() accepts
 only known commands with exactly their fields and values in range; anything
 else raises pydantic.ValidationError before reaching the runner, which then
-checks that the belt or input exists.
+checks that the belt or input exists. The runner records each applied
+command as a ``CommandRecord`` with the tick it was applied at.
 
 Layout and snapshot carry the tick and simulated time they describe. The two
 must agree (time_s = tick × 50 ms): a message cannot mix different instants.
@@ -172,6 +173,9 @@ class SnapshotMessage(TimedMessage):
     """Simulated state at one tick, with only the events the reader has not seen."""
 
     type: Literal["snapshot"] = "snapshot"
+    # 1 for the first run, +1 at every reset: a new number means the bags,
+    # events and times belong to a new run, even if the tick did not go back.
+    run: int = Field(ge=1)
     running: bool
     # Simulated seconds per real second: 1, 2 or 5.
     speed: int = Field(ge=1)
@@ -209,12 +213,13 @@ def layout_message(engine: Engine) -> LayoutMessage:
     )
 
 
-def snapshot_message(engine: Engine, *, running: bool, speed: int = 1,
+def snapshot_message(engine: Engine, *, running: bool, speed: int = 1, run: int = 1,
                      after_event_id: int = 0) -> SnapshotMessage:
     """Builds the snapshot; events are those with an id greater than after_event_id."""
     return SnapshotMessage(
         tick=engine.tick,
         time_s=engine.time_s,
+        run=run,
         running=running,
         speed=speed,
         inputs=[InputState(id=input_id, arrival_rate_bags_s=rate)
@@ -291,6 +296,12 @@ Command = Annotated[
     Field(discriminator="type"),
 ]
 _command_adapter: TypeAdapter[Command] = TypeAdapter(Command)
+
+
+class CommandRecord(TimedMessage):
+    """A command as the runner applied it, between ``tick`` and the next step."""
+
+    command: Command
 
 
 def parse_command(raw: str | bytes) -> Command:

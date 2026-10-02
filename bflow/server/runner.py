@@ -6,17 +6,25 @@ runner first applies all pending commands, then runs the ticks that real
 time says are due, in a limited group, and returns control to the server.
 The speed multiplies the ticks due per real second; reset replaces the
 engine with a new one built from the same layout and seed.
+
+Every applied command is recorded with the tick it was applied at: it takes
+effect from the next step, tick + 1. Replaying the recorded commands at the
+same ticks on a new engine with the same layout and seed gives the same run,
+whatever the speed or real timing (apply_to_engine is the shared part).
+Each reset starts a new run (runs are numbered from 1) whose record begins
+with the reset itself, at tick 0.
 """
 
 import asyncio
 import time
+from collections import deque
 from collections.abc import Callable
 
 from bflow.core.engine import STEP_MS, Engine
 from bflow.core.layout import default_layout
 from bflow.server.protocol import (
-    Command, PauseCommand, ResetCommand, RestartBeltCommand, SetRateCommand, SetSpeedCommand,
-    StartCommand, StopBeltCommand,
+    Command, CommandRecord, PauseCommand, ResetCommand, RestartBeltCommand, SetRateCommand,
+    SetSpeedCommand, StartCommand, StopBeltCommand,
 )
 
 
@@ -25,6 +33,9 @@ UPDATE_INTERVAL_S = 0.02
 # At most 1 simulated second per update, so that commands stay responsive
 # (at 5× an update normally runs about 2 ticks).
 MAX_TICKS_PER_UPDATE = 20
+# The record keeps at most this many commands per run, the newest ones:
+# far more than an operator sends, but a bound against a flooding client.
+MAX_RECORDED_COMMANDS = 10_000
 
 
 class Runner:
@@ -43,6 +54,11 @@ class Runner:
         self.commands: asyncio.Queue[Command] = asyncio.Queue()
         self.running = False
         self.speed = 1
+        # Number of the current run: 1 at start, +1 at every reset, so that
+        # readers can tell a new run from the old one even at the same tick.
+        self.run_number = 1
+        # Commands applied in the current run, oldest first.
+        self.record: deque[CommandRecord] = deque(maxlen=MAX_RECORDED_COMMANDS)
         # Real time and tick at which the current run started: the ticks due
         # are counted from here, without accumulating real time deltas.
         self._started_at = 0.0
@@ -65,7 +81,7 @@ class Runner:
         self.commands.put_nowait(command)
 
     def update(self) -> int:
-        """Applies the pending commands, then runs the due ticks.
+        """Applies and records the pending commands, then runs the due ticks.
 
         Commands are applied even while paused. Returns the number of ticks
         run. If the ticks due exceed MAX_TICKS_PER_UPDATE (a slow machine or
@@ -99,26 +115,41 @@ class Runner:
         Resuming and changing speed restart the real-time reference, so the
         real time spent paused is never simulated afterwards and a new speed
         applies only from now. Reset keeps the speed and leaves the new
-        engine paused at tick 0.
+        engine paused at tick 0, in a new run whose record starts with the
+        reset itself.
         """
+        if isinstance(command, ResetCommand):
+            self.engine = Engine(self.engine.layout, seed=self.engine.seed)
+            self.running = False
+            self.run_number += 1
+            self.record.clear()
+        self.record.append(CommandRecord(tick=self.engine.tick, time_s=self.engine.time_s,
+                                         command=command))
         if isinstance(command, StartCommand) and not self.running:
             self.running = True
             self._restart_clock(now)
         elif isinstance(command, PauseCommand):
             self.running = False
-        elif isinstance(command, ResetCommand):
-            self.engine = Engine(self.engine.layout, seed=self.engine.seed)
-            self.running = False
         elif isinstance(command, SetSpeedCommand) and command.speed != self.speed:
             self.speed = command.speed
             self._restart_clock(now)
-        elif isinstance(command, StopBeltCommand):
-            self.engine.stop_belt(command.belt_id)
-        elif isinstance(command, RestartBeltCommand):
-            self.engine.restart_belt(command.belt_id)
-        elif isinstance(command, SetRateCommand):
-            self.engine.set_arrival_rate(command.input_id, command.rate_bags_s)
+        else:
+            apply_to_engine(self.engine, command)
 
     def _restart_clock(self, now: float) -> None:
         self._started_at = now
         self._started_tick = self.engine.tick
+
+
+def apply_to_engine(engine: Engine, command: Command) -> None:
+    """Applies a command that changes the simulated plant; ignores the others.
+
+    Start, pause, speed and reset only decide which ticks run and when, so
+    a replay of a recorded run needs just this function and the ticks.
+    """
+    if isinstance(command, StopBeltCommand):
+        engine.stop_belt(command.belt_id)
+    elif isinstance(command, RestartBeltCommand):
+        engine.restart_belt(command.belt_id)
+    elif isinstance(command, SetRateCommand):
+        engine.set_arrival_rate(command.input_id, command.rate_bags_s)
