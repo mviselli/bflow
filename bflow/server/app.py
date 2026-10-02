@@ -2,6 +2,11 @@
 
     uv run uvicorn bflow.server.app:app
 
+It also serves the page built by Vite (frontend/dist, made by
+``npm --prefix frontend run build``) at http://127.0.0.1:8000/, so the built
+application needs this single process. Without a build the API and the
+WebSocket still work, and / says how to build the page.
+
 Handlers never call Engine.step(): they read the state or hand commands to
 the runner, which applies them in its own loop.
 
@@ -21,8 +26,11 @@ back and the connection stays open.
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from bflow.server.protocol import (
@@ -33,10 +41,25 @@ from bflow.server.runner import Runner
 
 # About 12 snapshots per real second, within the 10–15 Hz target.
 SNAPSHOT_INTERVAL_S = 1 / 12
+# Where Vite writes the built page: frontend/dist next to the bflow package.
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+NOT_BUILT_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>BaggageFlow</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 40em; margin: 3em auto">
+<h1>BaggageFlow</h1>
+<p>The simulation server is running, but the page has not been built yet.
+Build it once, then restart this server:</p>
+<pre>npm --prefix frontend ci
+npm --prefix frontend run build</pre>
+<p>During development you can use the Vite server instead
+(<code>npm --prefix frontend run dev</code>).</p>
+</body></html>
+"""
 
 
-def create_app(runner: Runner | None = None) -> FastAPI:
-    """Builds the app around a runner; tests can pass their own."""
+def create_app(runner: Runner | None = None, *, frontend_dir: Path = FRONTEND_DIST) -> FastAPI:
+    """Builds the app around a runner; tests can pass their own runner and page."""
     runner = runner if runner is not None else Runner()
 
     @asynccontextmanager
@@ -84,7 +107,30 @@ def create_app(runner: Runner | None = None) -> FastAPI:
             except (asyncio.CancelledError, WebSocketDisconnect, OSError):
                 pass
 
+    _serve_frontend(app, frontend_dir)
     return app
+
+
+def _serve_frontend(app: FastAPI, frontend_dir: Path) -> None:
+    """Serves the built page after the API and the WebSocket, which keep priority.
+
+    The page is index.html plus the files Vite puts next to it (assets/).
+    Whether a build exists is checked once, when the app is created: after a
+    first build, restart the server.
+    """
+    index = frontend_dir / "index.html"
+    if not index.is_file():
+        @app.get("/", include_in_schema=False)
+        async def not_built() -> HTMLResponse:
+            return HTMLResponse(NOT_BUILT_PAGE, status_code=503)
+        return
+
+    @app.get("/", include_in_schema=False)
+    async def page() -> FileResponse:
+        # Always revalidated: a new build links to assets with new names.
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
+
+    app.mount("/", StaticFiles(directory=frontend_dir), name="frontend")
 
 
 async def _send_snapshots(websocket: WebSocket, runner: Runner) -> None:

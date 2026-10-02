@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from bflow.core.engine import Engine
 from bflow.core.layout import default_layout, minimal_layout
-from bflow.server.app import SNAPSHOT_INTERVAL_S, create_app
+from bflow.server.app import FRONTEND_DIST, SNAPSHOT_INTERVAL_S, create_app
 from bflow.server.protocol import layout_message, snapshot_message
 from bflow.server.runner import Runner
 
@@ -284,3 +284,47 @@ def test_snapshots_arrive_at_about_twelve_per_second():
         elapsed = time.monotonic() - started
         # Six intervals of 1/12 s are 0.5 s; loose bounds for a busy machine.
         assert 0.4 <= elapsed <= 1.0
+
+
+# The built page
+
+
+def fake_build(directory):
+    """A minimal Vite build: index.html linking one hashed asset."""
+    (directory / "assets").mkdir()
+    (directory / "index.html").write_text(
+        '<!doctype html><script type="module" src="/assets/index-abc123.js"></script>')
+    (directory / "assets" / "index-abc123.js").write_text("console.log('page');")
+    return directory
+
+
+def test_the_built_page_and_its_assets_are_served_with_the_api(tmp_path):
+    app = create_app(Runner(clock=FakeClock()), frontend_dir=fake_build(tmp_path))
+    with TestClient(app) as client:
+        page = client.get("/")
+        assert page.status_code == 200
+        assert page.headers["content-type"].startswith("text/html")
+        assert page.headers["cache-control"] == "no-cache"
+        assert "/assets/index-abc123.js" in page.text
+        asset = client.get("/assets/index-abc123.js")
+        assert asset.status_code == 200
+        assert "javascript" in asset.headers["content-type"]
+        assert client.get("/assets/missing.js").status_code == 404
+        # The API and the WebSocket keep their paths.
+        assert client.get("/api/status").json()["tick"] == 0
+        with client.websocket_connect("/ws") as ws:
+            assert ws.receive_json()["type"] == "layout"
+
+
+def test_without_a_build_the_page_says_how_to_build_it(tmp_path):
+    app = create_app(Runner(clock=FakeClock()), frontend_dir=tmp_path / "dist")
+    with TestClient(app) as client:
+        page = client.get("/")
+        assert page.status_code == 503
+        assert "npm --prefix frontend run build" in page.text
+        assert client.get("/api/status").status_code == 200
+
+
+def test_the_app_serves_the_frontend_build_folder_by_default():
+    assert FRONTEND_DIST.parts[-2:] == ("frontend", "dist")
+    assert (FRONTEND_DIST.parent / "index.html").is_file()

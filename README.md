@@ -16,35 +16,45 @@ without the browser.
 - Node.js 22.12+ or 24+, with npm
 - A desktop browser with WebGL
 
-## Setup
+Node.js is needed only to build the page (once, and again after changing the
+frontend) or to develop it; running an existing build needs only uv.
+
+## Installation
 
 ```sh
 uv sync --locked
 npm --prefix frontend ci
+npm --prefix frontend run build
 ```
 
-## Run in the browser
+The last command writes the page to `frontend/dist/`.
 
-Start the simulation server and the page, each in its own terminal:
+## Run
 
 ```sh
 uv run uvicorn bflow.server.app:app
-npm --prefix frontend run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Use **Start**, **Pause**
-and **Resume**, **Reset** to start again from the beginning, and **1×**, **2×**
-or **5×** to change the speed. The indicators under the map come from the
-engine, in three groups: bag flow (generated, waiting at the desks, admitted,
-in transit), deliveries (delivered, wrong exits, throughput over the last 60
-simulated seconds, mean travel time) and alarms (errors, warnings); hover over
-one for its meaning. Scroll over
-the map to zoom, drag to move the view and use **Fit** to see the whole plant
-again. Click a bag, a belt or a check-in desk to see its details in the side panel
-(a belt's state and occupancy, a bag's destination, position and travel time,
-a desk's queue and arrival rate). From the panel you can stop and restart a
-belt, or change how many bags arrive at a desk. `Esc` clears the selection. Stop
-both servers with `Ctrl+C`.
+This single process runs the simulation and serves the page: open
+[http://127.0.0.1:8000](http://127.0.0.1:8000). Stop it with `Ctrl+C`. If the
+page has not been built, the address says how to build it; after building,
+restart the server.
+
+## Use
+
+Use **Start**, **Pause** and **Resume**, **Reset** to start again from the
+beginning, and **1×**, **2×** or **5×** to change the speed. Scroll over the
+map to zoom, drag to move the view and use **Fit** to see the whole plant
+again. Click a bag, a belt or a check-in desk to see its details in the side
+panel (a belt's state and occupancy, a bag's destination, position and travel
+time, a desk's queue and arrival rate). From the panel you can stop and
+restart a belt, or change how many bags arrive at a desk. `Esc` clears the
+selection.
+
+The indicators under the map come from the engine, in three groups: bag flow
+(generated, waiting at the desks, admitted, in transit), deliveries
+(delivered, wrong exits, throughput over the last 60 simulated seconds, mean
+travel time) and alarms (errors, warnings); hover over one for its meaning.
 
 If the server stops or the network drops, the page says so over the map,
 disables the commands and keeps the last state received, dimmed; it reconnects
@@ -55,6 +65,21 @@ The server records every command with the simulation step it was applied at.
 [http://127.0.0.1:8000/api/commands](http://127.0.0.1:8000/api/commands) lists
 the commands of the current run (a reset starts a new one): the same seed and
 the same commands at the same steps always give the same run, at any speed.
+
+## Develop the page
+
+While changing the frontend, run the simulation server and the Vite
+development server, each in its own terminal:
+
+```sh
+uv run uvicorn bflow.server.app:app
+npm --prefix frontend run dev
+```
+
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173): the page reloads when
+a frontend file changes, and Vite forwards `/ws` and `/api` to the Python
+server. Stop both with `Ctrl+C`. Build again (`npm --prefix frontend run
+build`) to update the page served on port 8000.
 
 ## Run from the command line
 
