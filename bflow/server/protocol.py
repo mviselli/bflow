@@ -105,7 +105,8 @@ class BaggageState(Message):
     entered_at_s is the simulated time of its admission: the bag's travel
     time so far is the snapshot's time_s minus it. missorted_to_id is the
     wrong output a sorting error sent it to, None while it follows its
-    destination.
+    destination. moved_at_s is when it last advanced; prolonged_wait is the
+    engine's warning for a bag that has not advanced for 30 s.
     """
 
     id: str = Field(min_length=1)
@@ -115,6 +116,8 @@ class BaggageState(Message):
     length_m: float = Field(gt=0)
     entered_at_s: float = Field(ge=0)
     missorted_to_id: str | None = Field(min_length=1)
+    moved_at_s: float = Field(ge=0)
+    prolonged_wait: bool
 
 
 class InputState(Message):

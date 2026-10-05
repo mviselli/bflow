@@ -4,8 +4,9 @@
 // panelContent() is pure (tested with node --test): from the selection, the
 // layout and the newest snapshot it builds a title, a list of rows and the
 // action available. Every value is the engine's, as the snapshot reports it;
-// the page only formats it. The one subtraction is a bag's travel time so
-// far, the snapshot's time minus the bag's admission time. Like the
+// the page only formats it. The only subtractions are a bag's travel time so
+// far (the snapshot's time minus its admission time) and, during a prolonged
+// wait, how long it has been still (the snapshot's time minus its last move). Like the
 // counters, the panel shows the newest snapshot, a fraction of a second ahead
 // of the picture.
 
@@ -98,6 +99,14 @@ function bagContent(id, layout, snapshot, destinations) {
   const wrong = baggage.missorted_to_id
     ? [{ label: 'Sorting error', value: `sent to ${elementName(baggage.missorted_to_id, layout)}` }]
     : [];
+  // The engine's warning for a bag that has not advanced for 30 s.
+  const still = baggage.prolonged_wait
+    ? [{
+      label: 'Prolonged wait',
+      value: `Warning · not moved for ${(snapshot.time_s - baggage.moved_at_s).toFixed(1)} s`,
+      alert: true,
+    }]
+    : [];
   return {
     title: `Bag ${id}`,
     destination: look && output ? { code: look.code, colour: look.colour, label: output.label } : null,
@@ -112,6 +121,7 @@ function bagContent(id, layout, snapshot, destinations) {
       },
       { label: 'Admitted at', value: formatTime(baggage.entered_at_s) },
       { label: 'Travel time', value: `${(snapshot.time_s - baggage.entered_at_s).toFixed(1)} s` },
+      ...still,
     ],
   };
 }

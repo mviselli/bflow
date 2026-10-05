@@ -3,10 +3,12 @@
 After each step a checker compares the engine with its state one tick
 earlier: baggage conservation, spacing, routing, the entrance queues,
 waiting at the end of a belt, the alternation at the merge, sorting
-errors (decided once, counted once, and the only cause of a wrong exit) and
-the congestion warnings (start after 10 s above 80 %, clear below 60 %).
+errors (decided once, counted once, and the only cause of a wrong exit),
+the congestion warnings (start after 10 s above 80 %, clear below 60 %) and
+the prolonged waits (a bag not advancing for 30 s warns until it advances).
 """
 
+from collections import Counter
 from dataclasses import replace
 
 import pytest
@@ -50,6 +52,11 @@ class PlantChecker:
         # Consecutive ticks each belt has been above 80 %, and its warning.
         self.ticks_above = {belt_id: 0 for belt_id in engine.conveyors}
         self.congested = {belt_id: False for belt_id in engine.conveyors}
+        # Tick each bag on a belt last advanced, and the bags in a prolonged wait.
+        self.advanced_at = {}
+        self.long_waits = set()
+        # Every event seen, by kind: the engine's history keeps only the latest.
+        self.event_counts = Counter()
         self.remember()
 
     def remember(self):
@@ -105,6 +112,8 @@ class PlantChecker:
         events = [event for event in engine.events.recent if event.id > self.last_event_id]
         self.check_sorting_errors(on_belts, events)
         self.check_congestion(events)
+        self.check_prolonged_waits(on_belts, events)
+        self.event_counts.update(event.kind for event in events)
         self.last_event_id = engine.events.last_id
         self.remember()
 
@@ -141,6 +150,40 @@ class PlantChecker:
             assert (belt_id in started) == (expected and not was)
             assert (belt_id in cleared) == (was and not expected)
             self.congested[belt_id] = expected
+
+    def check_prolonged_waits(self, on_belts, events):
+        """A bag warns after 600 ticks (30 s) without advancing, until it advances or exits.
+
+        Advancing is entering the plant, moving forward by more than rounding,
+        or passing to another belt or an output. Each start and each
+        resolution is one event, and the bag is never removed.
+        """
+        engine = self.engine
+        started, resolved = set(), set()
+        for bag in engine.exited_this_tick:
+            self.advanced_at.pop(bag.id)
+            if bag.id in self.long_waits:
+                resolved.add(bag.id)
+            assert not bag.prolonged_wait
+        for bag in on_belts:
+            before = self.places.get(bag.id)
+            if (before is None or before[0] != bag.conveyor_id
+                    or bag.position_m > before[1] + EPSILON):
+                self.advanced_at[bag.id] = engine.tick
+            expected = engine.tick - self.advanced_at[bag.id] >= 600
+            assert bag.prolonged_wait == expected, bag
+            if expected and bag.id not in self.long_waits:
+                started.add(bag.id)
+            if not expected and bag.id in self.long_waits:
+                resolved.add(bag.id)
+        self.long_waits = (self.long_waits | started) - resolved
+        kinds = Counter(event.kind for event in events)
+        assert {event.baggage_id for event in events
+                if event.kind == "prolonged_wait_started"} == started
+        assert {event.baggage_id for event in events
+                if event.kind == "prolonged_wait_resolved"} == resolved
+        assert (kinds["prolonged_wait_started"], kinds["prolonged_wait_resolved"]) == (
+            len(started), len(resolved))
 
     def check_spacing(self, conveyor):
         gap = self.engine.layout.min_gap_m
@@ -250,6 +293,11 @@ SCENARIOS = {
 
 
 def run(layout, commands, ticks, seed=42):
+    return run_checked(layout, commands, ticks, seed).engine
+
+
+def run_checked(layout, commands, ticks, seed=42):
+    """Runs a scenario under the checker and returns the checker (and so the engine)."""
     engine = Engine(layout, seed=seed)
     checker = PlantChecker(engine)
     for tick in range(ticks):
@@ -259,7 +307,7 @@ def run(layout, commands, ticks, seed=42):
             checker.halted = halted_belts(engine)
         engine.step()
         checker.check()
-    return engine
+    return checker
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
@@ -361,14 +409,18 @@ def test_two_forced_errors_give_two_errors_and_two_wrong_exits():
 
 
 def test_a_stopped_branch_congests_the_line_behind_it_and_the_warnings_clear_after_restart():
-    engine = run(*SCENARIOS["demo: branch 2 stopped for 120 s"])
-    started = [event.element_id for event in engine.events.recent
-               if event.kind == "congestion_started"]
+    checker = run_checked(*SCENARIOS["demo: branch 2 stopped for 120 s"])
+    engine = checker.engine
     # The line backs up to every desk: each belt on the way warns once (line-2
-    # again while the backlog drains after the restart).
-    assert set(started) == set(engine.conveyors) - {"line-3", "line-4", "branch-1", "branch-2",
-                                                    "branch-3"}
-    assert engine.stats().warnings == len(started) == len(set(started)) + 1
+    # again while the backlog drains after the restart), and so do the bags
+    # held still for 30 s.
+    congested = set(engine.conveyors) - {"line-3", "line-4", "branch-1", "branch-2", "branch-3"}
+    assert checker.event_counts["congestion_started"] == len(congested) + 1
+    assert checker.event_counts["prolonged_wait_started"] > 0
+    assert engine.stats().warnings == (checker.event_counts["congestion_started"]
+                                       + checker.event_counts["prolonged_wait_started"])
+    assert checker.event_counts["prolonged_wait_resolved"] == checker.event_counts[
+        "prolonged_wait_started"]
     # Once the backlog has gone, every warning has cleared.
     for _ in range(6000):
         engine.step()
@@ -479,3 +531,47 @@ def test_the_checker_notices_a_faulty_belt_that_keeps_moving():
                 checker.halted = halted_belts(engine)
             engine.step()
             checker.check()
+
+
+def waits_never_resolve(engine):
+    """A bag that advances again keeps its prolonged-wait warning."""
+    def advanced(baggage):
+        baggage.moved_at_s = engine.time_s
+    engine._advanced = advanced
+
+
+def impatient_waits(engine):
+    """Bags warn after 15 s without advancing instead of 30 s."""
+    update = engine._update_prolonged_waits
+
+    def sooner():
+        for conveyor in engine.conveyors.values():
+            for bag in conveyor.baggage:
+                if bag.moved_at_s == engine.time_s - 0.05:
+                    bag.moved_at_s -= 15
+        update()
+    engine._update_prolonged_waits = sooner
+
+
+@pytest.mark.parametrize("sabotage", [waits_never_resolve, impatient_waits])
+def test_the_checker_notices_a_broken_prolonged_wait(sabotage):
+    engine = Engine(with_rates(1))
+    checker = PlantChecker(engine)
+    sabotage(engine)
+    with pytest.raises(AssertionError):
+        for tick in range(3000):
+            if tick == 100:
+                engine.stop_belt("collector")
+                checker.halted = halted_belts(engine)
+            if tick == 1300:
+                engine.restart_belt("collector")
+                checker.halted = halted_belts(engine)
+            engine.step()
+            checker.check()
+
+
+def test_without_sabotage_the_same_stop_passes_the_checker():
+    checker = run_checked(with_rates(1), {100: ("stop_belt", "collector"),
+                                          1300: ("restart_belt", "collector")}, 3000)
+    assert checker.event_counts["prolonged_wait_started"] > 0
+    assert checker.event_counts["prolonged_wait_resolved"] > 0

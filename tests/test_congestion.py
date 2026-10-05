@@ -32,6 +32,13 @@ def advance(engine, ticks):
         engine.step()
 
 
+def congestion_warnings(engine):
+    """Congestion warnings among all warnings (bags held still also warn after 30 s)."""
+    warnings = [event.kind for event in engine.events.recent if event.severity == Severity.WARNING]
+    assert len(warnings) == engine.stats().warnings  # nothing dropped from the history
+    return warnings.count("congestion_started")
+
+
 def congestion_events(engine):
     return [(event.tick, event.severity, event.kind, event.element_id)
             for event in engine.events.recent if event.kind.startswith("congestion")]
@@ -46,9 +53,9 @@ def test_a_belt_above_80_percent_becomes_congested_after_exactly_10_seconds():
     engine.step()
     assert conveyor.congested
     assert congestion_events(engine) == [(201, Severity.WARNING, "congestion_started", "belt-1")]
-    assert engine.stats().warnings == 1
+    assert congestion_warnings(engine) == 1
     advance(engine, 1000)
-    assert engine.stats().warnings == 1  # one warning per start, not per tick
+    assert congestion_warnings(engine) == 1  # one warning per start, not per tick
 
 
 def test_exactly_80_percent_or_less_never_congests():
@@ -85,7 +92,7 @@ def test_congestion_clears_only_below_60_percent():
         (702, Severity.INFO, "congestion_cleared", "belt-1"),
     ]
     # The clearing is information: still one warning.
-    assert engine.stats().warnings == 1
+    assert congestion_warnings(engine) == 1
 
 
 def test_a_new_congestion_after_clearing_is_a_new_warning():
@@ -98,7 +105,7 @@ def test_a_new_congestion_after_clearing_is_a_new_warning():
     advance(engine, 201)
     assert [kind for _, _, kind, _ in congestion_events(engine)] == [
         "congestion_started", "congestion_cleared", "congestion_started"]
-    assert engine.stats().warnings == 2
+    assert congestion_warnings(engine) == 2
 
 
 def test_no_congestion_without_stepping_so_a_pause_freezes_the_time():
@@ -120,4 +127,4 @@ def test_saturated_inputs_congest_the_feeders_with_one_warning_each():
     started = [event.element_id for event in engine.events.recent
                if event.kind == "congestion_started"]
     assert {"feeder-a-1", "feeder-b", "feeder-c-1"} <= set(started)
-    assert len(started) == len(set(started)) == engine.stats().warnings
+    assert len(started) == len(set(started))

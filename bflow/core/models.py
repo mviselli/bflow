@@ -26,6 +26,10 @@ class Baggage:
     ``position_m`` keeps the last position. Travel time starts at
     ``entered_at_s``, excluding the wait at the entrance.
 
+    ``moved_at_s`` is when the bag last advanced (admission, movement,
+    transfer or exit); ``prolonged_wait`` is the warning of a bag that has
+    not advanced for too long, active until it advances again.
+
     ``sorted_at_id`` is the last sorter that decided the bag's branch, so a
     bag waiting at a sorter is decided only once. ``missorted_to_id`` is the
     wrong output a sorting error sends the bag to; None while it follows its
@@ -40,6 +44,8 @@ class Baggage:
     position_m: float = 0.0
     entered_at_s: float | None = None
     exited_at_s: float | None = None
+    moved_at_s: float | None = None
+    prolonged_wait: bool = False
     sorted_at_id: str | None = None
     missorted_to_id: str | None = None
 
@@ -64,12 +70,18 @@ class Baggage:
         if self.entered_at_s is None:
             if self.conveyor_id is not None or self.exited_at_s is not None:
                 raise ValueError("A bag that was not admitted cannot be on a belt or exited")
+            if self.moved_at_s is not None or self.prolonged_wait:
+                raise ValueError("A bag that was not admitted cannot have moved or waited")
             if self.position_m != 0:
                 raise ValueError("A waiting bag must be at position zero")
         else:
             check_quantity("entered_at_s", self.entered_at_s)
             if self.entered_at_s < self.generated_at_s:
                 raise ValueError("Admission cannot precede generation")
+            if self.moved_at_s is None:
+                self.moved_at_s = self.entered_at_s
+            if self.moved_at_s < self.entered_at_s:
+                raise ValueError("A bag cannot move before its admission")
             if self.exited_at_s is None:
                 if self.conveyor_id is None:
                     raise ValueError("A bag in transit must be on a belt")

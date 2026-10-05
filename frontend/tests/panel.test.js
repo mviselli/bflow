@@ -18,7 +18,9 @@ const LAYOUT = {
   ],
 };
 
-function snapshot({ stopped = false, faulty = false, congested = false, bags = 3, missortedTo = null } = {}) {
+function snapshot({
+  stopped = false, faulty = false, congested = false, bags = 3, missortedTo = null, waiting = false,
+} = {}) {
   return {
     tick: 400,
     time_s: 20,
@@ -29,6 +31,7 @@ function snapshot({ stopped = false, faulty = false, congested = false, bags = 3
     baggage: [{
       id: 'bag-7', destination_id: 'output-1', conveyor_id: 'line', position_m: 3.25,
       length_m: 0.6, entered_at_s: 12.5, missorted_to_id: missortedTo,
+      moved_at_s: waiting ? 13.75 : 20, prolonged_wait: waiting,
     }],
     stats: {
       belts: [{ belt_id: 'line', bags, capacity: 6, occupancy: bags / 6 }],
@@ -107,6 +110,15 @@ test('a missorted bag shows where the sorting error sent it', () => {
     { label: 'Sorting error', value: 'sent to Output BF 205' },
   ]);
   assert.equal(content.missorted, true);
+});
+
+test('a bag in a prolonged wait shows how long it has been still, highlighted', () => {
+  const content = panelContent({ kind: 'bag', id: 'bag-7' }, LAYOUT, snapshot({ waiting: true }));
+  assert.deepEqual(content.rows.at(-1), {
+    label: 'Prolonged wait', value: 'Warning · not moved for 6.3 s', alert: true,
+  });
+  const moving = panelContent({ kind: 'bag', id: 'bag-7' }, LAYOUT, snapshot());
+  assert.ok(!moving.rows.some((row) => row.label === 'Prolonged wait'));
 });
 
 test('a bag that has left the plant says so', () => {

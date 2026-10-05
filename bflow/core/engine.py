@@ -19,6 +19,11 @@ THROUGHPUT_WINDOW_TICKS = 60 * 1000 // STEP_MS
 CONGESTION_ON = 0.8
 CONGESTION_OFF = 0.6
 CONGESTION_DELAY_TICKS = 10 * 1000 // STEP_MS
+# Prolonged wait: a bag on a belt that has not advanced for this long.
+PROLONGED_WAIT_S = 30.0
+# A bag advances only if its position grows by more than this: smaller
+# changes are rounding, not movement.
+MOVE_EPSILON_M = 1e-9
 
 
 class Engine:
@@ -295,6 +300,7 @@ class Engine:
         self._admit()
         self._update_entrance_queues()
         self._update_congestion()
+        self._update_prolonged_waits()
 
     def _move(self) -> None:
         """Advances each running belt from the exit towards the entrance.
@@ -312,10 +318,11 @@ class Engine:
             for baggage in reversed(conveyor.baggage):
                 max_position = front_limit - baggage.length_m
                 # max prevents tiny backward moves caused by rounding of the gap.
-                baggage.position_m = max(
-                    baggage.position_m,
-                    min(baggage.position_m + distance, max_position),
-                )
+                position = max(baggage.position_m,
+                               min(baggage.position_m + distance, max_position))
+                if position > baggage.position_m + MOVE_EPSILON_M:
+                    self._advanced(baggage)
+                baggage.position_m = position
                 front_limit = baggage.position_m - self.layout.min_gap_m
 
     def _outputs_after(self, element_id: str) -> set[str]:
@@ -463,6 +470,7 @@ class Engine:
             if target_id in self.merge_inputs:
                 self.last_merged[target_id] = conveyor.config.id
             next_conveyor = self._next_conveyor(conveyor, baggage)
+            self._advanced(baggage)
             if next_conveyor is not None:
                 baggage.conveyor_id = next_conveyor.config.id
                 baggage.position_m = 0.0
@@ -540,6 +548,7 @@ class Engine:
             baggage = queue.popleft()
             baggage.conveyor_id = conveyor.config.id
             baggage.entered_at_s = self.time_s
+            baggage.moved_at_s = self.time_s
             baggage.position_m = 0.0
             conveyor.baggage.insert(0, baggage)
             self.admitted_count += 1
@@ -595,3 +604,38 @@ class Engine:
                                    "congestion_cleared",
                                    "Congestion cleared: occupancy below 60 %",
                                    element_id=belt_id)
+
+    def _advanced(self, baggage: Baggage) -> None:
+        """Notes that a bag advanced this tick, resolving its prolonged wait if any.
+
+        Called for movement along a belt, a transfer to the next belt and an
+        exit, which is a transfer to an output; admission sets the time
+        directly.
+        """
+        if baggage.prolonged_wait:
+            baggage.prolonged_wait = False
+            self.events.record(self.tick, self.time_s, Severity.INFO,
+                               "prolonged_wait_resolved",
+                               f"Moving again after {self.time_s - baggage.moved_at_s:.1f} s",
+                               element_id=baggage.conveyor_id, baggage_id=baggage.id)
+        baggage.moved_at_s = self.time_s
+
+    def _update_prolonged_waits(self) -> None:
+        """Starts the warning of each bag on a belt that has not advanced for 30 s.
+
+        The bag stays where it is and is still counted in transit; it waits
+        for space ahead, for its turn, or for its belt to be restarted or
+        repaired. One warning event per occurrence; the warning resolves when
+        the bag advances (see _advanced). Time is simulated time, so a pause
+        stands still. The tiny margin keeps 30 s of 50 ms steps from being
+        lost to rounding.
+        """
+        for conveyor in self.conveyors.values():
+            for baggage in conveyor.baggage:
+                if (not baggage.prolonged_wait
+                        and self.time_s - baggage.moved_at_s >= PROLONGED_WAIT_S - 1e-9):
+                    baggage.prolonged_wait = True
+                    self.events.record(self.tick, self.time_s, Severity.WARNING,
+                                       "prolonged_wait_started",
+                                       "Prolonged wait: not moved for 30 s",
+                                       element_id=conveyor.config.id, baggage_id=baggage.id)

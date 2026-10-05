@@ -250,6 +250,20 @@ def test_snapshot_reports_wrong_sorting_settings_and_the_missorted_bag():
     assert any(sent.values()) and None in sent.values()
 
 
+def test_snapshot_reports_when_each_bag_last_moved_and_its_prolonged_wait():
+    engine = Engine(default_layout())
+    engine = run(engine, 600)
+    engine.fault_belt("line-1")
+    engine = run(engine, 800)
+    sent = {bag.id: (bag.moved_at_s, bag.prolonged_wait)
+            for bag in snapshot_message(engine, running=True).baggage}
+    expected = {bag.id: (bag.moved_at_s, bag.prolonged_wait)
+                for conveyor in engine.conveyors.values() for bag in conveyor.baggage}
+    assert sent == expected
+    assert any(waiting for _, waiting in sent.values())
+    assert not all(waiting for _, waiting in sent.values())
+
+
 def test_snapshot_carries_only_new_events():
     engine = Engine()
     engine.events.record(1, 0.05, Severity.INFO, "first", "First")
