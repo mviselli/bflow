@@ -8,8 +8,8 @@ from bflow.core.engine import Engine
 from bflow.core.layout import default_layout
 from bflow.server import runner as runner_module
 from bflow.server.protocol import (
-    PauseCommand, ResetCommand, RestartBeltCommand, SetRateCommand, SetSpeedCommand, StartCommand,
-    StopBeltCommand,
+    FaultBeltCommand, PauseCommand, RepairBeltCommand, ResetCommand, RestartBeltCommand,
+    SetRateCommand, SetSpeedCommand, StartCommand, StopBeltCommand,
 )
 from bflow.server.runner import MAX_RECORDED_COMMANDS, MAX_TICKS_PER_UPDATE, Runner, apply_to_engine
 
@@ -249,9 +249,33 @@ def test_belt_and_rate_commands_reach_the_engine():
     assert not runner.engine.conveyors["branch-2"].stopped
 
 
+def test_neither_restart_nor_start_clears_a_fault_only_repair_does():
+    runner, clock = make_runner()
+    runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-1"))
+    runner.submit(RestartBeltCommand(type="restart_belt", belt_id="line-1"))
+    runner.submit(START)
+    runner.submit(PAUSE)
+    runner.submit(START)
+    runner.update()
+    clock.now += 1
+    runner.update()
+    assert runner.engine.conveyors["line-1"].faulty
+    runner.submit(RepairBeltCommand(type="repair_belt", belt_id="line-1"))
+    runner.update()
+    assert not runner.engine.conveyors["line-1"].halted
+    assert recorded(runner)[-1] == (20, "repair_belt")
+    # A reset brings back the plant with no fault.
+    runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-1"))
+    runner.submit(ResetCommand(type="reset"))
+    runner.update()
+    assert not runner.engine.conveyors["line-1"].faulty
+
+
 @pytest.mark.parametrize("command", [
     StopBeltCommand(type="stop_belt", belt_id="belt-x"),
     RestartBeltCommand(type="restart_belt", belt_id="input-a1"),
+    FaultBeltCommand(type="fault_belt", belt_id="merge-main"),
+    RepairBeltCommand(type="repair_belt", belt_id="output-1"),
     SetRateCommand(type="set_rate", input_id="line-1", rate_bags_s=0.1),
 ])
 def test_commands_for_elements_not_in_the_plant_are_refused_at_once(command):
@@ -330,8 +354,10 @@ def test_replaying_the_record_at_the_same_ticks_gives_the_same_run():
                PAUSE,
                RestartBeltCommand(type="restart_belt", belt_id="branch-1"),
                START,
+               FaultBeltCommand(type="fault_belt", belt_id="island-a-3"),
+               RepairBeltCommand(type="repair_belt", belt_id="island-a-3"),
                SetRateCommand(type="set_rate", input_id="input-a2", rate_bags_s=0.0)]
-    for step in range(400):
+    for step in range(500):
         clock.now += 0.013 + (step % 7) * 0.004
         if step % 60 == 30 and actions:
             runner.submit(actions.pop(0))

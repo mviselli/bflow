@@ -18,14 +18,14 @@ const LAYOUT = {
   ],
 };
 
-function snapshot({ stopped = false, bags = 3 } = {}) {
+function snapshot({ stopped = false, faulty = false, bags = 3 } = {}) {
   return {
     tick: 400,
     time_s: 20,
     running: true,
     speed: 1,
     inputs: [{ id: 'input-a', arrival_rate_bags_s: 0.15 }],
-    belts: [{ id: 'line', stopped }],
+    belts: [{ id: 'line', stopped, faulty }],
     baggage: [{
       id: 'bag-7', destination_id: 'output-1', conveyor_id: 'line', position_m: 3.25,
       length_m: 0.6, entered_at_s: 12.5,
@@ -52,15 +52,24 @@ test('a belt shows its state, occupancy and connections from the snapshot', () =
     From: 'Check-in A1', To: 'Output BF 101',
   });
   assert.equal(content.occupancy, 0.5);
-  assert.equal(content.stopped, false);
+  assert.equal(content.state, 'running');
   assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: false });
 });
 
 test('a stopped belt says so', () => {
   const content = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ stopped: true }));
   assert.equal(values(content).State, 'Stopped by the operator');
-  assert.equal(content.stopped, true);
+  assert.equal(content.state, 'stopped');
   assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: true });
+});
+
+test('a faulty belt says so, and a fault wins over the operator\'s stop', () => {
+  const faulty = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ faulty: true }));
+  assert.equal(values(faulty).State, 'Faulty · needs repair');
+  assert.equal(faulty.state, 'faulty');
+  const both = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ stopped: true, faulty: true }));
+  assert.equal(values(both).State, 'Faulty · also stopped by the operator');
+  assert.equal(both.state, 'faulty');
 });
 
 test('before the first snapshot a belt shows its layout only', () => {

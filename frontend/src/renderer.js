@@ -16,7 +16,7 @@
 // moved at once, and when it has been still for REBUILD_DELAY_MS the
 // textures are redrawn sharp for the new view. Clicking a bag, a check-in
 // desk or a belt selects it: an outline follows it and onSelect reports it.
-// A belt stopped by the operator keeps its surface still.
+// A halted belt (stopped by the operator or faulty) keeps its surface still.
 
 import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import {
@@ -78,7 +78,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   let drawnBags = [];             // bags of the last frame, as drawn
   let desks = [];                 // { id, belt } for each input and the belt it feeds
   let selection = null;           // { kind: 'bag' | 'input' | 'belt', id } or null
-  let stoppedBelts = new Set();   // belts stopped by the operator, from the newest snapshot
+  let haltedBelts = new Set();    // belts stopped or faulty, from the newest snapshot
   let newest = null;              // the newest snapshot
   const surfaceOffsets = new Map(); // belt id → offset of its surface in metres
   let surfaceTime = null;         // simulated time the surfaces were last moved to
@@ -163,7 +163,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
 
   // Scrolls each rubber surface by the distance its belt has run since the
   // last frame: nothing while simulated time stands still or the belt is
-  // stopped. Time going back (a reset) starts every surface again from 0.
+  // halted. Time going back (a reset) starts every surface again from 0.
   function moveSurfaces(timeS) {
     let dtS = surfaceTime === null ? 0 : timeS - surfaceTime;
     if (dtS < 0) {
@@ -174,7 +174,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     for (const belt of layout.belts) {
       const surface = surfaces.get(belt.id);
       const tileWidthM = surface.texture.width / resolution / geometry.pixelsPerMetre;
-      const speed = stoppedBelts.has(belt.id) ? 0 : belt.speed_m_s;
+      const speed = haltedBelts.has(belt.id) ? 0 : belt.speed_m_s;
       const offset = advanceSurface(surfaceOffsets.get(belt.id) ?? 0, speed, dtS, tileWidthM);
       surfaceOffsets.set(belt.id, offset);
       surface.tilePosition.x = geometry.toPixels(offset);
@@ -373,7 +373,8 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
         surfaceTime = null;
       }
       newest = snapshot;
-      stoppedBelts = new Set(snapshot.belts.filter((belt) => belt.stopped).map((belt) => belt.id));
+      haltedBelts = new Set(snapshot.belts.filter((belt) => belt.stopped || belt.faulty)
+        .map((belt) => belt.id));
       playback.add(snapshot, nowSeconds());
     },
   };

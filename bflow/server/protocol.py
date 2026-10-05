@@ -8,7 +8,8 @@ Every message is a JSON object with a ``type`` field. The server sends:
 - ``error``: a rejected command.
 
 The browser sends commands: ``start``, ``pause``, ``reset``, ``set_speed``,
-``set_rate``, ``stop_belt`` and ``restart_belt``. parse_command() accepts
+``set_rate``, ``stop_belt``, ``restart_belt``, ``fault_belt`` and
+``repair_belt``. parse_command() accepts
 only known commands with exactly their fields and values in range; anything
 else raises pydantic.ValidationError before reaching the runner, which then
 checks that the belt or input exists. The runner records each applied
@@ -121,10 +122,14 @@ class InputState(Message):
 
 
 class BeltState(Message):
-    """The operator's local stop of one belt (not the global pause)."""
+    """One belt's operator stop (not the global pause) and fault.
+
+    The two are independent: the belt moves only when neither is set.
+    """
 
     id: str = Field(min_length=1)
     stopped: bool
+    faulty: bool
 
 
 class BeltStatsState(Message):
@@ -226,7 +231,7 @@ def snapshot_message(engine: Engine, *, running: bool, speed: int = 1, run: int 
         speed=speed,
         inputs=[InputState(id=input_id, arrival_rate_bags_s=rate)
                 for input_id, rate in engine.arrival_rates.items()],
-        belts=[BeltState(id=belt_id, stopped=conveyor.stopped)
+        belts=[BeltState(id=belt_id, stopped=conveyor.stopped, faulty=conveyor.faulty)
                for belt_id, conveyor in engine.conveyors.items()],
         baggage=[BaggageState.model_validate(baggage, from_attributes=True)
                  for conveyor in engine.conveyors.values() for baggage in conveyor.baggage],
@@ -286,15 +291,32 @@ class StopBeltCommand(Message):
 
 
 class RestartBeltCommand(Message):
-    """Restarts a belt stopped by the operator."""
+    """Restarts a belt stopped by the operator; it does not clear a fault."""
 
     type: Literal["restart_belt"]
     belt_id: str = Field(min_length=1)
 
 
+class FaultBeltCommand(Message):
+    """Puts one belt in fault (a demo of a breakdown) until it is repaired."""
+
+    type: Literal["fault_belt"]
+    belt_id: str = Field(min_length=1)
+
+
+class RepairBeltCommand(Message):
+    """Repairs a faulty belt."""
+
+    type: Literal["repair_belt"]
+    belt_id: str = Field(min_length=1)
+
+
+# Commands that name one belt, which the runner checks against the layout.
+BELT_COMMANDS = (StopBeltCommand, RestartBeltCommand, FaultBeltCommand, RepairBeltCommand)
+
 Command = Annotated[
     StartCommand | PauseCommand | ResetCommand | SetSpeedCommand | SetRateCommand
-    | StopBeltCommand | RestartBeltCommand,
+    | StopBeltCommand | RestartBeltCommand | FaultBeltCommand | RepairBeltCommand,
     Field(discriminator="type"),
 ]
 _command_adapter: TypeAdapter[Command] = TypeAdapter(Command)

@@ -11,6 +11,8 @@ from bflow.core.layout import default_layout, minimal_layout
 from bflow.server.protocol import (
     CommandRecord,
     ErrorMessage,
+    FaultBeltCommand,
+    RepairBeltCommand,
     ResetCommand,
     RestartBeltCommand,
     SetRateCommand,
@@ -46,6 +48,8 @@ def run(engine: Engine, ticks: int) -> Engine:
     ('{"type": "set_rate", "input_id": "input-a1", "rate_bags_s": 0}', SetRateCommand),
     ('{"type": "stop_belt", "belt_id": "line-2"}', StopBeltCommand),
     ('{"type": "restart_belt", "belt_id": "line-2"}', RestartBeltCommand),
+    ('{"type": "fault_belt", "belt_id": "line-2"}', FaultBeltCommand),
+    ('{"type": "repair_belt", "belt_id": "line-2"}', RepairBeltCommand),
 ])
 def test_known_commands_are_parsed(raw, expected):
     assert isinstance(parse_command(raw), expected)
@@ -69,6 +73,8 @@ def test_known_commands_are_parsed(raw, expected):
     '{"type": "set_rate", "rate_bags_s": 0.1}',
     '{"type": "stop_belt"}',
     '{"type": "stop_belt", "belt_id": "line-2", "now": true}',
+    '{"type": "fault_belt"}',
+    '{"type": "repair_belt", "belt_id": ""}',
     '{"type": "reset", "seed": 7}',
 ])
 def test_invalid_commands_are_rejected(raw):
@@ -204,12 +210,15 @@ def test_snapshot_stats_are_the_engine_stats():
     ]
 
 
-def test_snapshot_has_every_belt_with_its_stop_and_occupancy_in_layout_order():
+def test_snapshot_has_every_belt_with_its_stop_fault_and_occupancy_in_layout_order():
     engine = run(Engine(default_layout()), 1200)
     engine.stop_belt("line-2")
+    engine.fault_belt("line-2")
+    engine.fault_belt("branch-1")
     snapshot = snapshot_message(engine, running=False)
-    assert [(belt.id, belt.stopped) for belt in snapshot.belts] == [
-        (belt.id, belt.id == "line-2") for belt in engine.layout.belts]
+    assert [(belt.id, belt.stopped, belt.faulty) for belt in snapshot.belts] == [
+        (belt.id, belt.id == "line-2", belt.id in {"line-2", "branch-1"})
+        for belt in engine.layout.belts]
     line = next(belt for belt in snapshot.stats.belts if belt.belt_id == "line-1")
     assert (line.bags, line.capacity) == (len(engine.conveyors["line-1"].baggage), 7)
     assert line.occupancy == line.bags / 7

@@ -23,8 +23,9 @@ from collections.abc import Callable
 from bflow.core.engine import STEP_MS, Engine
 from bflow.core.layout import default_layout
 from bflow.server.protocol import (
-    Command, CommandRecord, PauseCommand, ResetCommand, RestartBeltCommand, SetRateCommand,
-    SetSpeedCommand, StartCommand, StopBeltCommand,
+    BELT_COMMANDS, Command, CommandRecord, FaultBeltCommand, PauseCommand, RepairBeltCommand,
+    ResetCommand, RestartBeltCommand, SetRateCommand, SetSpeedCommand, StartCommand,
+    StopBeltCommand,
 )
 
 
@@ -72,7 +73,7 @@ class Runner:
         on reset, so the check stays valid until the command is applied.
         """
         layout = self.engine.layout
-        if isinstance(command, (StopBeltCommand, RestartBeltCommand)):
+        if isinstance(command, BELT_COMMANDS):
             if command.belt_id not in {belt.id for belt in layout.belts}:
                 raise ValueError(f"Unknown belt: {command.belt_id}")
         elif isinstance(command, SetRateCommand):
@@ -151,5 +152,9 @@ def apply_to_engine(engine: Engine, command: Command) -> None:
         engine.stop_belt(command.belt_id)
     elif isinstance(command, RestartBeltCommand):
         engine.restart_belt(command.belt_id)
+    elif isinstance(command, FaultBeltCommand):
+        engine.fault_belt(command.belt_id)
+    elif isinstance(command, RepairBeltCommand):
+        engine.repair_belt(command.belt_id)
     elif isinstance(command, SetRateCommand):
         engine.set_arrival_rate(command.input_id, command.rate_bags_s)

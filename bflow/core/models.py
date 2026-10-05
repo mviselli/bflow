@@ -70,11 +70,18 @@ class Conveyor:
 
     The engine maintains the order, membership and spacing of the list.
     The configuration stays separate from the state so it can be reset.
-    ``stopped`` is the operator's local stop, distinct from the global pause:
-    a stopped belt neither moves nor hands over bags, but still receives one
-    when its entrance has space.
+    ``stopped`` is the operator's local stop, distinct from the global pause;
+    ``faulty`` is a fault, cleared only by a repair, never by a restart. The
+    two are independent: a halted belt (either of them) neither moves nor
+    hands over bags, but still receives one when its entrance has space.
     """
 
     config: BeltConfig
     baggage: list[Baggage] = field(default_factory=list)
     stopped: bool = False
+    faulty: bool = False
+
+    @property
+    def halted(self) -> bool:
+        """True if the belt cannot move: stopped by the operator or faulty."""
+        return self.stopped or self.faulty

@@ -32,13 +32,21 @@ function elementName(id, layout) {
   return id;
 }
 
+// A belt's condition in words. A fault and the operator's stop are
+// independent: the belt moves only when neither is set.
+export function beltStateText(state) {
+  if (!state) return '—';
+  if (state.faulty) return state.stopped ? 'Faulty · also stopped by the operator' : 'Faulty · needs repair';
+  return state.stopped ? 'Stopped by the operator' : 'Running';
+}
+
 function beltContent(id, layout, snapshot) {
   const belt = layout.belts.find((item) => item.id === id);
   if (!belt) return null;
   const state = snapshot?.belts.find((item) => item.id === id);
   const stats = snapshot?.stats.belts.find((item) => item.belt_id === id);
   const rows = [
-    { label: 'State', value: state ? (state.stopped ? 'Stopped by the operator' : 'Running') : '—' },
+    { label: 'State', value: beltStateText(state) },
     { label: 'Bags', value: stats ? `${stats.bags} of ${stats.capacity}` : '—' },
     { label: 'Occupancy', value: stats ? `${Math.round(stats.occupancy * 100)} %` : '—' },
     { label: 'Length', value: metres(belt.length_m) },
@@ -50,7 +58,8 @@ function beltContent(id, layout, snapshot) {
     title: `Belt ${id}`,
     rows,
     occupancy: stats ? stats.occupancy : null,
-    stopped: state?.stopped ?? false,
+    // 'running', 'stopped' or 'faulty' (a fault wins), for the state's colour.
+    state: !state ? null : state.faulty ? 'faulty' : state.stopped ? 'stopped' : 'running',
     action: state ? { kind: 'belt', beltId: id, stopped: state.stopped } : null,
   };
 }
@@ -193,6 +202,7 @@ export function createPanel(element, { onCommand = () => {} } = {}) {
       showAction(content);
       body.replaceChildren();
       if (!content) {
+        element.dataset.state = '';
         title.textContent = 'Details';
         const hint = document.createElement('p');
         hint.textContent = 'Select a bag, a belt or a check-in desk on the map to see its details here.';
@@ -232,7 +242,7 @@ export function createPanel(element, { onCommand = () => {} } = {}) {
         bar.append(fill);
         body.append(bar);
       }
-      element.dataset.stopped = content.stopped ? 'true' : 'false';
+      element.dataset.state = content.state ?? '';
     },
   };
 }

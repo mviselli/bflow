@@ -225,6 +225,21 @@ def test_a_belt_not_in_the_plant_gets_an_error_and_a_real_one_stops():
         assert stopped["events"][-1]["kind"] == "belt_stopped"
 
 
+def test_a_fault_reaches_the_snapshot_as_an_error_and_a_repair_clears_it():
+    app, _, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        ws.send_text('{"type": "fault_belt", "belt_id": "branch-3"}')
+        faulty = receive_until(ws, lambda m: m["type"] == "snapshot" and any(
+            belt["id"] == "branch-3" and belt["faulty"] for belt in m["belts"]))
+        assert faulty["events"][-1]["kind"] == "belt_fault"
+        assert faulty["stats"]["errors"] == 1
+        ws.send_text('{"type": "repair_belt", "belt_id": "branch-3"}')
+        repaired = receive_until(ws, lambda m: m["type"] == "snapshot" and not any(
+            belt["faulty"] for belt in m["belts"]))
+        assert repaired["events"][-1]["kind"] == "belt_repaired"
+        assert repaired["stats"]["errors"] == 1
+
+
 def test_after_a_reset_the_new_engine_events_reach_an_open_connection():
     app, _, clock = make_app(Engine(minimal_layout(arrival_rate_bags_s=5.0)))
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:

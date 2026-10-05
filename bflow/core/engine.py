@@ -176,10 +176,11 @@ class Engine:
         self._set_stopped(belt_id, False)
 
     def _set_stopped(self, belt_id: str, stopped: bool) -> None:
-        """Changes a belt's local stop, recording an event only if it changes."""
-        if belt_id not in self.conveyors:
-            raise ValueError(f"Unknown belt: {belt_id!r}")
-        conveyor = self.conveyors[belt_id]
+        """Changes a belt's local stop, recording an event only if it changes.
+
+        It never touches a fault: restarting a faulty belt leaves it halted.
+        """
+        conveyor = self._conveyor(belt_id)
         if conveyor.stopped == stopped:
             return
         conveyor.stopped = stopped
@@ -190,6 +191,40 @@ class Engine:
         # A voluntary stop is information, not a fault.
         self.events.record(self.tick, self.time_s, Severity.INFO, kind, message,
                            element_id=belt_id)
+
+    def fault_belt(self, belt_id: str) -> None:
+        """Puts one belt in fault, from the next step, until it is repaired.
+
+        The belt halts like a stopped one, but restart_belt does not clear the
+        fault: only repair_belt does. The operator's stop is independent, so a
+        belt stopped during the fault stays stopped after the repair. Records
+        an error event when the fault starts; a fault on a faulty belt does
+        nothing.
+        """
+        conveyor = self._conveyor(belt_id)
+        if conveyor.faulty:
+            return
+        conveyor.faulty = True
+        self.events.record(self.tick, self.time_s, Severity.ERROR, "belt_fault",
+                           "Belt fault: halted until repaired", element_id=belt_id)
+
+    def repair_belt(self, belt_id: str) -> None:
+        """Repairs a faulty belt, from the next step; does nothing on a working one.
+
+        The belt moves again unless the operator also stopped it. The repair
+        is information: it resolves the fault without counting a new error.
+        """
+        conveyor = self._conveyor(belt_id)
+        if not conveyor.faulty:
+            return
+        conveyor.faulty = False
+        self.events.record(self.tick, self.time_s, Severity.INFO, "belt_repaired",
+                           "Belt repaired", element_id=belt_id)
+
+    def _conveyor(self, belt_id: str) -> Conveyor:
+        if belt_id not in self.conveyors:
+            raise ValueError(f"Unknown belt: {belt_id!r}")
+        return self.conveyors[belt_id]
 
     def set_arrival_rate(self, input_id: str, rate_bags_s: float) -> None:
         """Changes one input's rate on the operator's command, from the next step.
@@ -228,7 +263,7 @@ class Engine:
         bag has finished moving.
         """
         for conveyor in self.conveyors.values():
-            if conveyor.stopped:
+            if conveyor.halted:
                 continue
             distance = conveyor.config.speed_m_s * STEP_SECONDS
             front_limit = conveyor.config.length_m
@@ -281,11 +316,12 @@ class Engine:
         a sorter) accepts it only if its entrance has space; otherwise the bag
         waits at the end of its belt, and the bags behind it wait too. Several
         belts can be ready for the same merge: _resolve_merges chooses one.
-        A stopped belt hands over nothing, but can still receive a bag.
+        A halted belt (stopped or faulty) hands over nothing, but can still
+        receive a bag.
         """
         leaving = []
         for conveyor in self.conveyors.values():
-            if conveyor.stopped or not conveyor.baggage:
+            if conveyor.halted or not conveyor.baggage:
                 continue
             baggage = conveyor.baggage[-1]
             if baggage.position_m < conveyor.config.length_m - baggage.length_m:
@@ -399,7 +435,7 @@ class Engine:
 
         The belt list is ordered from entrance to exit: the first element is
         the closest to the new bag. One admission per tick is enough because
-        the new bag immediately occupies position zero. A stopped belt admits
+        the new bag immediately occupies position zero. A halted belt admits
         a bag too if its entrance is free, but then keeps it there.
         """
         for input_id, queue in self.waiting.items():

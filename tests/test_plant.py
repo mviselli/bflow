@@ -25,6 +25,11 @@ def at_end(conveyor, bag):
     return bag.position_m >= conveyor.config.length_m - bag.length_m
 
 
+def halted_belts(engine):
+    """Belts that may not move or hand over bags: stopped or faulty."""
+    return {belt_id for belt_id, conveyor in engine.conveyors.items() if conveyor.halted}
+
+
 class PlantChecker:
     """Remembers where every bag was, and checks the tick that follows."""
 
@@ -40,8 +45,7 @@ class PlantChecker:
     def remember(self):
         self.places = {bag.id: (bag.conveyor_id, bag.position_m)
                        for conveyor in self.engine.conveyors.values() for bag in conveyor.baggage}
-        self.stopped = {belt_id for belt_id, conveyor in self.engine.conveyors.items()
-                        if conveyor.stopped}
+        self.halted = halted_belts(self.engine)
         self.last_merged = dict(self.engine.last_merged)
 
     def check(self):
@@ -71,12 +75,12 @@ class PlantChecker:
                     entered.setdefault(belt_id, []).append((bag, None))
                 elif before[0] == belt_id:
                     moved = bag.position_m - before[1]
-                    limit = 0 if belt_id in self.stopped else conveyor.config.speed_m_s * STEP_SECONDS
+                    limit = 0 if belt_id in self.halted else conveyor.config.speed_m_s * STEP_SECONDS
                     assert -EPSILON <= moved <= limit + EPSILON, bag
                 else:
                     # One hop along the plant, to the belt chosen for this bag.
                     previous = engine.conveyors[before[0]]
-                    assert previous.config.id not in self.stopped
+                    assert previous.config.id not in self.halted
                     assert engine._next_conveyor(previous, bag) is conveyor
                     assert bag.position_m == 0
                     entered.setdefault(belt_id, []).append((bag, previous))
@@ -113,7 +117,7 @@ class PlantChecker:
         """A bag at the end of a running belt waits only for space, or for its merge turn."""
         engine = self.engine
         for belt_id, conveyor in engine.conveyors.items():
-            if conveyor.stopped or not conveyor.baggage or not at_end(conveyor, conveyor.baggage[-1]):
+            if conveyor.halted or not conveyor.baggage or not at_end(conveyor, conveyor.baggage[-1]):
                 continue
             bag = conveyor.baggage[-1]
             if self.places.get(bag.id, (None,))[0] != belt_id:
@@ -149,7 +153,7 @@ class PlantChecker:
                 waiting = [bag for bag in conveyor.baggage[-1:]
                            if self.places.get(bag.id, (None,))[0] == belt_id]
                 # A skipped belt had no bag ready at the merge.
-                assert conveyor.stopped or not waiting or not at_end(conveyor, waiting[0])
+                assert conveyor.halted or not waiting or not at_end(conveyor, waiting[0])
 
 
 def with_rates(rate, layout=None):
@@ -180,6 +184,11 @@ SCENARIOS = {
         3000: ("stop_belt", "island-b-3"), 5400: ("restart_belt", "island-b-3")}, 12000),
     "demo: branch 2 stopped for 120 s": (default_layout(), {
         3000: ("stop_belt", "branch-2"), 5400: ("restart_belt", "branch-2")}, 12000),
+    "collector faulty for 60 s, restart refused": (compact_layout(), {
+        3000: ("fault_belt", "collector"), 3600: ("restart_belt", "collector"),
+        4200: ("repair_belt", "collector")}, 12000),
+    "demo: line 2 faulty for 120 s": (default_layout(), {
+        3000: ("fault_belt", "line-2"), 5400: ("repair_belt", "line-2")}, 12000),
 }
 
 
@@ -190,8 +199,7 @@ def run(layout, commands, ticks, seed=42):
         if tick in commands:
             method, belt_id = commands[tick]
             getattr(engine, method)(belt_id)
-            checker.stopped = {belt_id for belt_id, conveyor in engine.conveyors.items()
-                               if conveyor.stopped}
+            checker.halted = halted_belts(engine)
         engine.step()
         checker.check()
     return engine
@@ -275,6 +283,19 @@ def test_a_stopped_branch_blocks_the_whole_line_behind_its_divert():
     assert engine.waiting_count == 0
 
 
+def test_after_a_fault_is_repaired_the_queue_clears_while_demand_is_below_capacity():
+    engine = Engine(default_layout())
+    for tick in range(5400):
+        if tick == 3000:
+            engine.fault_belt("line-2")
+        engine.step()
+    # The whole sort line backs up to every desk while line 2 is faulty.
+    assert all(node.waiting > 0 for node in engine.stats().inputs)
+    engine = run(*SCENARIOS["demo: line 2 faulty for 120 s"])
+    assert engine.waiting_count == 0
+    assert engine.stats().errors == 1
+
+
 def unfair_merge(engine):
     """The merge always lets the last ready belt through: no turns."""
     def resolve(ready):
@@ -310,5 +331,28 @@ def test_the_checker_notices_a_broken_rule(sabotage):
     sabotage(engine)
     with pytest.raises(AssertionError):
         for _ in range(3000):
+            engine.step()
+            checker.check()
+
+
+def test_the_checker_notices_a_faulty_belt_that_keeps_moving():
+    engine = Engine(with_rates(1))
+    checker = PlantChecker(engine)
+    move = engine._move
+
+    def move_ignoring_faults():
+        faulty = [conveyor for conveyor in engine.conveyors.values() if conveyor.faulty]
+        for conveyor in faulty:
+            conveyor.faulty = False
+        move()
+        for conveyor in faulty:
+            conveyor.faulty = True
+
+    engine._move = move_ignoring_faults
+    with pytest.raises(AssertionError):
+        for tick in range(3000):
+            if tick == 500:
+                engine.fault_belt("collector")
+                checker.halted = halted_belts(engine)
             engine.step()
             checker.check()
