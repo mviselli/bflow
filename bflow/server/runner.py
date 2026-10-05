@@ -23,9 +23,9 @@ from collections.abc import Callable
 from bflow.core.engine import STEP_MS, Engine
 from bflow.core.layout import default_layout
 from bflow.server.protocol import (
-    BELT_COMMANDS, Command, CommandRecord, FaultBeltCommand, PauseCommand, RepairBeltCommand,
-    ResetCommand, RestartBeltCommand, SetRateCommand, SetSpeedCommand, StartCommand,
-    StopBeltCommand,
+    BELT_COMMANDS, Command, CommandRecord, FaultBeltCommand, ForceMissortCommand, PauseCommand,
+    RepairBeltCommand, ResetCommand, RestartBeltCommand, SetMissortProbabilityCommand,
+    SetRateCommand, SetSpeedCommand, StartCommand, StopBeltCommand,
 )
 
 
@@ -158,3 +158,7 @@ def apply_to_engine(engine: Engine, command: Command) -> None:
         engine.repair_belt(command.belt_id)
     elif isinstance(command, SetRateCommand):
         engine.set_arrival_rate(command.input_id, command.rate_bags_s)
+    elif isinstance(command, SetMissortProbabilityCommand):
+        engine.set_missort_probability(command.probability)
+    elif isinstance(command, ForceMissortCommand):
+        engine.force_missort()

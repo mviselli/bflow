@@ -12,9 +12,11 @@ from bflow.server.protocol import (
     CommandRecord,
     ErrorMessage,
     FaultBeltCommand,
+    ForceMissortCommand,
     RepairBeltCommand,
     ResetCommand,
     RestartBeltCommand,
+    SetMissortProbabilityCommand,
     SetRateCommand,
     SetSpeedCommand,
     StopBeltCommand,
@@ -50,6 +52,9 @@ def run(engine: Engine, ticks: int) -> Engine:
     ('{"type": "restart_belt", "belt_id": "line-2"}', RestartBeltCommand),
     ('{"type": "fault_belt", "belt_id": "line-2"}', FaultBeltCommand),
     ('{"type": "repair_belt", "belt_id": "line-2"}', RepairBeltCommand),
+    ('{"type": "set_missort_probability", "probability": 0.1}', SetMissortProbabilityCommand),
+    ('{"type": "set_missort_probability", "probability": 1}', SetMissortProbabilityCommand),
+    ('{"type": "force_missort"}', ForceMissortCommand),
 ])
 def test_known_commands_are_parsed(raw, expected):
     assert isinstance(parse_command(raw), expected)
@@ -75,6 +80,10 @@ def test_known_commands_are_parsed(raw, expected):
     '{"type": "stop_belt", "belt_id": "line-2", "now": true}',
     '{"type": "fault_belt"}',
     '{"type": "repair_belt", "belt_id": ""}',
+    '{"type": "set_missort_probability", "probability": 1.1}',
+    '{"type": "set_missort_probability", "probability": -0.5}',
+    '{"type": "set_missort_probability"}',
+    '{"type": "force_missort", "bag": "bag-1"}',
     '{"type": "reset", "seed": 7}',
 ])
 def test_invalid_commands_are_rejected(raw):
@@ -222,6 +231,22 @@ def test_snapshot_has_every_belt_with_its_stop_fault_and_occupancy_in_layout_ord
     line = next(belt for belt in snapshot.stats.belts if belt.belt_id == "line-1")
     assert (line.bags, line.capacity) == (len(engine.conveyors["line-1"].baggage), 7)
     assert line.occupancy == line.bags / 7
+
+
+def test_snapshot_reports_wrong_sorting_settings_and_the_missorted_bag():
+    engine = Engine(default_layout())
+    snapshot = snapshot_message(engine, running=False)
+    assert (snapshot.missort_probability, snapshot.missort_forced) == (0.0, False)
+    engine.set_missort_probability(0.3)
+    engine.force_missort()
+    snapshot = snapshot_message(engine, running=False)
+    assert (snapshot.missort_probability, snapshot.missort_forced) == (0.3, True)
+    engine = run(engine, 600)
+    sent = {bag.id: bag.missorted_to_id for bag in snapshot_message(engine, running=True).baggage}
+    expected = {bag.id: bag.missorted_to_id for conveyor in engine.conveyors.values()
+                for bag in conveyor.baggage}
+    assert sent == expected
+    assert any(sent.values()) and None in sent.values()
 
 
 def test_snapshot_carries_only_new_events():

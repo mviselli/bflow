@@ -240,6 +240,19 @@ def test_a_fault_reaches_the_snapshot_as_an_error_and_a_repair_clears_it():
         assert repaired["stats"]["errors"] == 1
 
 
+def test_a_forced_wrong_sorting_reaches_the_snapshot():
+    app, _, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        ws.send_text('{"type": "set_missort_probability", "probability": 0.25}')
+        ws.send_text('{"type": "force_missort"}')
+        forced = receive_until(ws, lambda m: m["type"] == "snapshot" and m["missort_forced"])
+        assert forced["missort_probability"] == 0.25
+        assert [event["kind"] for event in forced["events"]][-2:] == [
+            "missort_probability_changed", "missort_forced"]
+        ws.send_text('{"type": "set_missort_probability", "probability": 2}')
+        assert receive_until(ws, is_error)["message"].startswith("Invalid command")
+
+
 def test_after_a_reset_the_new_engine_events_reach_an_open_connection():
     app, _, clock = make_app(Engine(minimal_layout(arrival_rate_bags_s=5.0)))
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:

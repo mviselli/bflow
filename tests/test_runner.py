@@ -8,8 +8,9 @@ from bflow.core.engine import Engine
 from bflow.core.layout import default_layout
 from bflow.server import runner as runner_module
 from bflow.server.protocol import (
-    FaultBeltCommand, PauseCommand, RepairBeltCommand, ResetCommand, RestartBeltCommand,
-    SetRateCommand, SetSpeedCommand, StartCommand, StopBeltCommand,
+    FaultBeltCommand, ForceMissortCommand, PauseCommand, RepairBeltCommand, ResetCommand,
+    RestartBeltCommand, SetMissortProbabilityCommand, SetRateCommand, SetSpeedCommand,
+    StartCommand, StopBeltCommand,
 )
 from bflow.server.runner import MAX_RECORDED_COMMANDS, MAX_TICKS_PER_UPDATE, Runner, apply_to_engine
 
@@ -249,6 +250,17 @@ def test_belt_and_rate_commands_reach_the_engine():
     assert not runner.engine.conveyors["branch-2"].stopped
 
 
+def test_sorting_commands_reach_the_engine_and_reset_brings_back_zero():
+    runner, _ = make_runner()
+    runner.submit(SetMissortProbabilityCommand(type="set_missort_probability", probability=0.2))
+    runner.submit(ForceMissortCommand(type="force_missort"))
+    runner.update()
+    assert (runner.engine.missort_probability, runner.engine.missort_forced) == (0.2, True)
+    runner.submit(ResetCommand(type="reset"))
+    runner.update()
+    assert (runner.engine.missort_probability, runner.engine.missort_forced) == (0.0, False)
+
+
 def test_neither_restart_nor_start_clears_a_fault_only_repair_does():
     runner, clock = make_runner()
     runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-1"))
@@ -355,9 +367,11 @@ def test_replaying_the_record_at_the_same_ticks_gives_the_same_run():
                RestartBeltCommand(type="restart_belt", belt_id="branch-1"),
                START,
                FaultBeltCommand(type="fault_belt", belt_id="island-a-3"),
+               SetMissortProbabilityCommand(type="set_missort_probability", probability=0.3),
+               ForceMissortCommand(type="force_missort"),
                RepairBeltCommand(type="repair_belt", belt_id="island-a-3"),
                SetRateCommand(type="set_rate", input_id="input-a2", rate_bags_s=0.0)]
-    for step in range(500):
+    for step in range(620):
         clock.now += 0.013 + (step % 7) * 0.004
         if step % 60 == 30 and actions:
             runner.submit(actions.pop(0))

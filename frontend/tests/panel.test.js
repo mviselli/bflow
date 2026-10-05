@@ -18,7 +18,7 @@ const LAYOUT = {
   ],
 };
 
-function snapshot({ stopped = false, faulty = false, bags = 3 } = {}) {
+function snapshot({ stopped = false, faulty = false, bags = 3, missortedTo = null } = {}) {
   return {
     tick: 400,
     time_s: 20,
@@ -28,7 +28,7 @@ function snapshot({ stopped = false, faulty = false, bags = 3 } = {}) {
     belts: [{ id: 'line', stopped, faulty }],
     baggage: [{
       id: 'bag-7', destination_id: 'output-1', conveyor_id: 'line', position_m: 3.25,
-      length_m: 0.6, entered_at_s: 12.5,
+      length_m: 0.6, entered_at_s: 12.5, missorted_to_id: missortedTo,
     }],
     stats: {
       belts: [{ belt_id: 'line', bags, capacity: 6, occupancy: bags / 6 }],
@@ -90,6 +90,16 @@ test('a bag shows its destination, place and travel time so far', () => {
     Destination: 'Output BF 101', 'On belt': 'line', Position: '3.3 m of 5.0 m',
     'Admitted at': '00:12.50', 'Travel time': '7.5 s',
   });
+});
+
+test('a missorted bag shows where the sorting error sent it', () => {
+  const layout = { ...LAYOUT, outputs: [...LAYOUT.outputs, { id: 'output-2', label: 'BF 205', position: point(5, 3) }] };
+  const content = panelContent({ kind: 'bag', id: 'bag-7' }, layout, snapshot({ missortedTo: 'output-2' }));
+  assert.deepEqual(content.rows.slice(0, 2), [
+    { label: 'Destination', value: 'Output BF 101' },
+    { label: 'Sorting error', value: 'sent to Output BF 205' },
+  ]);
+  assert.equal(content.missorted, true);
 });
 
 test('a bag that has left the plant says so', () => {

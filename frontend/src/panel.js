@@ -89,11 +89,17 @@ function bagContent(id, layout, snapshot, destinations) {
   const output = layout.outputs.find((node) => node.id === baggage.destination_id);
   const belt = layout.belts.find((item) => item.id === baggage.conveyor_id);
   const look = destinations.get(baggage.destination_id);
+  // A sorting error sends the bag to another output: said right after its destination.
+  const wrong = baggage.missorted_to_id
+    ? [{ label: 'Sorting error', value: `sent to ${elementName(baggage.missorted_to_id, layout)}` }]
+    : [];
   return {
     title: `Bag ${id}`,
     destination: look && output ? { code: look.code, colour: look.colour, label: output.label } : null,
+    missorted: Boolean(baggage.missorted_to_id),
     rows: [
       { label: 'Destination', value: output ? `Output ${output.label}` : baggage.destination_id },
+      ...wrong,
       { label: 'On belt', value: baggage.conveyor_id },
       {
         label: 'Position',
@@ -242,7 +248,7 @@ export function createPanel(element, { onCommand = () => {} } = {}) {
         bar.append(fill);
         body.append(bar);
       }
-      element.dataset.state = content.state ?? '';
+      element.dataset.state = content.state ?? (content.missorted ? 'missorted' : '');
     },
   };
 }

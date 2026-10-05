@@ -8,8 +8,8 @@ Every message is a JSON object with a ``type`` field. The server sends:
 - ``error``: a rejected command.
 
 The browser sends commands: ``start``, ``pause``, ``reset``, ``set_speed``,
-``set_rate``, ``stop_belt``, ``restart_belt``, ``fault_belt`` and
-``repair_belt``. parse_command() accepts
+``set_rate``, ``stop_belt``, ``restart_belt``, ``fault_belt``,
+``repair_belt``, ``set_missort_probability`` and ``force_missort``. parse_command() accepts
 only known commands with exactly their fields and values in range; anything
 else raises pydantic.ValidationError before reaching the runner, which then
 checks that the belt or input exists. The runner records each applied
@@ -103,7 +103,9 @@ class BaggageState(Message):
     """A bag on a belt; position_m is its rear edge, as in the engine.
 
     entered_at_s is the simulated time of its admission: the bag's travel
-    time so far is the snapshot's time_s minus it.
+    time so far is the snapshot's time_s minus it. missorted_to_id is the
+    wrong output a sorting error sent it to, None while it follows its
+    destination.
     """
 
     id: str = Field(min_length=1)
@@ -112,6 +114,7 @@ class BaggageState(Message):
     position_m: float = Field(ge=0)
     length_m: float = Field(gt=0)
     entered_at_s: float = Field(ge=0)
+    missorted_to_id: str | None = Field(min_length=1)
 
 
 class InputState(Message):
@@ -189,6 +192,10 @@ class SnapshotMessage(TimedMessage):
     # One entry per input and per belt, in layout order.
     inputs: list[InputState]
     belts: list[BeltState]
+    # Chance of a wrong sorting at each sorter passage, and whether an error
+    # is forced on the next bag decided at a sorter.
+    missort_probability: float = Field(ge=0, le=1)
+    missort_forced: bool
     baggage: list[BaggageState]
     stats: StatsState
     events: list[EventState]
@@ -233,6 +240,8 @@ def snapshot_message(engine: Engine, *, running: bool, speed: int = 1, run: int 
                 for input_id, rate in engine.arrival_rates.items()],
         belts=[BeltState(id=belt_id, stopped=conveyor.stopped, faulty=conveyor.faulty)
                for belt_id, conveyor in engine.conveyors.items()],
+        missort_probability=engine.missort_probability,
+        missort_forced=engine.missort_forced,
         baggage=[BaggageState.model_validate(baggage, from_attributes=True)
                  for conveyor in engine.conveyors.values() for baggage in conveyor.baggage],
         stats=StatsState.model_validate(engine.stats(), from_attributes=True),
@@ -311,12 +320,26 @@ class RepairBeltCommand(Message):
     belt_id: str = Field(min_length=1)
 
 
+class SetMissortProbabilityCommand(Message):
+    """Sets the chance of a wrong sorting at each sorter passage."""
+
+    type: Literal["set_missort_probability"]
+    probability: float = Field(ge=0, le=1)
+
+
+class ForceMissortCommand(Message):
+    """Forces a wrong sorting on the next bag decided at a sorter."""
+
+    type: Literal["force_missort"]
+
+
 # Commands that name one belt, which the runner checks against the layout.
 BELT_COMMANDS = (StopBeltCommand, RestartBeltCommand, FaultBeltCommand, RepairBeltCommand)
 
 Command = Annotated[
     StartCommand | PauseCommand | ResetCommand | SetSpeedCommand | SetRateCommand
-    | StopBeltCommand | RestartBeltCommand | FaultBeltCommand | RepairBeltCommand,
+    | StopBeltCommand | RestartBeltCommand | FaultBeltCommand | RepairBeltCommand
+    | SetMissortProbabilityCommand | ForceMissortCommand,
     Field(discriminator="type"),
 ]
 _command_adapter: TypeAdapter[Command] = TypeAdapter(Command)

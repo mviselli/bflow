@@ -2,7 +2,8 @@
 
 After each step a checker compares the engine with its state one tick
 earlier: baggage conservation, spacing, routing, the entrance queues,
-waiting at the end of a belt and the alternation at the merge.
+waiting at the end of a belt, the alternation at the merge and sorting
+errors (decided once, counted once, and the only cause of a wrong exit).
 """
 
 from dataclasses import replace
@@ -10,6 +11,7 @@ from dataclasses import replace
 import pytest
 
 from bflow.core.engine import STEP_SECONDS, Engine
+from bflow.core.events import Severity
 from bflow.core.layout import default_layout
 from tests.layouts import compact_layout
 
@@ -40,6 +42,10 @@ class PlantChecker:
                                             if conveyor.config.source_id == merge_id)
                              for merge_id in engine.merge_inputs}
         self.last_admitted = {input_id: 0 for input_id in engine.waiting}
+        # Wrong output of every bag missorted so far, and the wrong exits seen.
+        self.missorted = {}
+        self.wrong_exits = 0
+        self.last_event_id = engine.events.last_id
         self.remember()
 
     def remember(self):
@@ -52,9 +58,11 @@ class PlantChecker:
         engine = self.engine
         stats = engine.stats()
         assert stats.is_conserved
-        assert engine.misdelivered_count == 0
         for bag in engine.exited_this_tick:
             assert (bag.conveyor_id, bag.exited_at_s) == (None, engine.time_s)
+            # Only a sorting error leads to a wrong exit.
+            self.wrong_exits += bag.missorted_to_id is not None
+        assert engine.misdelivered_count == self.wrong_exits
 
         on_belts = [bag for conveyor in engine.conveyors.values() for bag in conveyor.baggage]
         ids = [bag.id for bag in on_belts] + [bag.id for queue in engine.waiting.values()
@@ -65,8 +73,9 @@ class PlantChecker:
         for belt_id, conveyor in engine.conveyors.items():
             self.check_spacing(conveyor)
             for bag in conveyor.baggage:
-                # Routing: the bag's destination is still ahead of it.
-                assert bag.destination_id in self.reachable[belt_id], bag
+                # Routing: the output it is sent to (its destination unless
+                # missorted) is still ahead of it.
+                assert bag.route_output_id in self.reachable[belt_id], bag
                 before = self.places.get(bag.id)
                 if before is None:
                     # Admitted this tick, at the start of its input belt.
@@ -89,7 +98,27 @@ class PlantChecker:
         self.check_queues(entered)
         self.check_waiting_at_belt_ends(entered)
         self.check_merges(entered)
+        self.check_sorting_errors(on_belts)
         self.remember()
+
+    def check_sorting_errors(self, on_belts):
+        """A missort is decided once, never changes, and records exactly one error event."""
+        engine = self.engine
+        new = {}
+        for bag in on_belts:
+            if bag.missorted_to_id is None:
+                assert bag.id not in self.missorted
+            elif bag.id in self.missorted:
+                assert bag.missorted_to_id == self.missorted[bag.id]
+            else:
+                assert bag.missorted_to_id != bag.destination_id
+                new[bag.id] = bag.missorted_to_id
+        events = [event for event in engine.events.recent if event.id > self.last_event_id]
+        errors = {event.baggage_id for event in events if event.kind == "wrong_sorting"}
+        assert errors == set(new)
+        assert len([event for event in events if event.kind == "wrong_sorting"]) == len(new)
+        self.missorted.update(new)
+        self.last_event_id = engine.events.last_id
 
     def check_spacing(self, conveyor):
         gap = self.engine.layout.min_gap_m
@@ -168,7 +197,7 @@ def with_slow_branch_2():
                                        else belt for belt in layout.belts))
 
 
-# Layout, commands by tick, number of ticks. The compact plant has three-way
+# Layout, commands by tick (engine method and arguments), number of ticks. The compact plant has three-way
 # junctions; the demo plant chains two-way merges and diverts.
 SCENARIOS = {
     "normal flow": (compact_layout(), {}, 12000),
@@ -189,6 +218,12 @@ SCENARIOS = {
         4200: ("repair_belt", "collector")}, 12000),
     "demo: line 2 faulty for 120 s": (default_layout(), {
         3000: ("fault_belt", "line-2"), 5400: ("repair_belt", "line-2")}, 12000),
+    "wrong sorting 10 %": (compact_layout(), {0: ("set_missort_probability", 0.1)}, 12000),
+    "demo: wrong sorting 20 % while branch 2 is stopped": (default_layout(), {
+        0: ("set_missort_probability", 0.2), 3000: ("stop_belt", "branch-2"),
+        4200: ("restart_belt", "branch-2")}, 12000),
+    "demo: forced errors": (default_layout(), {
+        1000: ("force_missort",), 1001: ("force_missort",), 3000: ("force_missort",)}, 6000),
 }
 
 
@@ -197,8 +232,8 @@ def run(layout, commands, ticks, seed=42):
     checker = PlantChecker(engine)
     for tick in range(ticks):
         if tick in commands:
-            method, belt_id = commands[tick]
-            getattr(engine, method)(belt_id)
+            method, *args = commands[tick]
+            getattr(engine, method)(*args)
             checker.halted = halted_belts(engine)
         engine.step()
         checker.check()
@@ -296,6 +331,13 @@ def test_after_a_fault_is_repaired_the_queue_clears_while_demand_is_below_capaci
     assert engine.stats().errors == 1
 
 
+def test_two_forced_errors_give_two_errors_and_two_wrong_exits():
+    # The request repeated at tick 1001, before a bag reached a sorter, adds nothing.
+    engine = run(*SCENARIOS["demo: forced errors"])
+    stats = engine.stats()
+    assert (stats.errors, stats.misdelivered) == (2, 2)
+
+
 def unfair_merge(engine):
     """The merge always lets the last ready belt through: no turns."""
     def resolve(ready):
@@ -324,7 +366,33 @@ def wrong_branch(engine):
     routes["output-1"], routes["output-2"] = routes["output-2"], routes["output-1"]
 
 
-@pytest.mark.parametrize("sabotage", [unfair_merge, lazy_feeder, lazy_admission, wrong_branch])
+def error_counted_twice(engine):
+    """Every sorting error records a second error event."""
+    engine.set_missort_probability(0.2)
+    missort = engine._missort
+
+    def twice(baggage, sorter_id):
+        missort(baggage, sorter_id)
+        engine.events.record(engine.tick, engine.time_s, Severity.ERROR, "wrong_sorting",
+                             "Counted again", element_id=sorter_id, baggage_id=baggage.id)
+    engine._missort = twice
+
+
+def sorter_changes_its_mind(engine):
+    """The sorter decides again at every tick for a bag waiting at it."""
+    engine.set_missort_probability(0.5)
+    sort = engine._sort
+
+    def again():
+        for conveyor in engine.conveyors.values():
+            for bag in conveyor.baggage:
+                bag.sorted_at_id = bag.missorted_to_id = None
+        sort()
+    engine._sort = again
+
+
+@pytest.mark.parametrize("sabotage", [unfair_merge, lazy_feeder, lazy_admission, wrong_branch,
+                                      error_counted_twice, sorter_changes_its_mind])
 def test_the_checker_notices_a_broken_rule(sabotage):
     engine = Engine(with_rates(1))
     checker = PlantChecker(engine)

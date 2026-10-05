@@ -2,6 +2,7 @@
 
     uv run python -m bflow.cli --duration 600 --seed 42
     uv run python -m bflow.cli --layout minimal   # the one-belt route of the page
+    uv run python -m bflow.cli --missort-probability 0.05   # with sorting errors
 
 Uses the same engine as the server and steps as fast as possible, without
 waiting for real time. Exits with status 1 if baggage conservation fails.
@@ -32,6 +33,16 @@ def _duration_ticks(value: str) -> int:
     return ticks
 
 
+def _probability(value: str) -> float:
+    try:
+        probability = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("probability must be a number") from None
+    if not 0 <= probability <= 1:
+        raise argparse.ArgumentTypeError("probability must be between 0 and 1")
+    return probability
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m bflow.cli",
@@ -44,11 +55,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--layout", choices=LAYOUTS, default="full",
                         help="full: six desks in two islands, one sort line, four outputs; "
                              "minimal: one belt (default: full)")
+    parser.add_argument("--missort-probability", type=_probability, default=0.0, metavar="P",
+                        help="chance that a sorter sends a bag down a wrong branch, "
+                             "from 0 to 1 (default: 0)")
     return parser
 
 
-def format_summary(stats: Stats, seed: int, layout_name: str = "full") -> str:
-    """The totals, then one line per input, output and belt, as the engine counted them."""
+def format_summary(stats: Stats, seed: int, layout_name: str = "full",
+                   missort_probability: float = 0.0) -> str:
+    """The totals, then one line per input, output and belt, as the engine counted them.
+
+    The wrong sorting probability is shown in the header only when it is set.
+    """
     mean = "—" if stats.mean_travel_time_s is None else f"{stats.mean_travel_time_s:.2f} s"
     conservation = "OK" if stats.is_conserved else "FAILED"
     rows = [
@@ -70,7 +88,9 @@ def format_summary(stats: Stats, seed: int, layout_name: str = "full") -> str:
                    + [belt.belt_id for belt in stats.belts])
     lines = [
         "BaggageFlow — run summary",
-        f"Layout {layout_name} · seed {seed} · {stats.time_s:.2f} simulated s "
+        f"Layout {layout_name} · seed {seed} · "
+        + (f"wrong sorting {missort_probability:g} · " if missort_probability else "")
+        + f"{stats.time_s:.2f} simulated s "
         f"({stats.tick} ticks)",
         "",
         *(f"{label + ':':<{width + 1}} {value}" for label, value in rows),
@@ -96,10 +116,11 @@ def format_summary(stats: Stats, seed: int, layout_name: str = "full") -> str:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     engine = Engine(LAYOUTS[args.layout](), seed=args.seed)
+    engine.set_missort_probability(args.missort_probability)
     for _ in range(args.duration):
         engine.step()
     stats = engine.stats()
-    print(format_summary(stats, args.seed, args.layout))
+    print(format_summary(stats, args.seed, args.layout, args.missort_probability))
     return 0 if stats.is_conserved else 1
 
 

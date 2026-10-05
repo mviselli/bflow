@@ -39,6 +39,27 @@ def test_summary_lists_each_input_output_and_belt_as_counted_by_the_engine(capsy
         assert f"{belt.belt_id:<10} {belt.bags:>5} / {belt.capacity:<3}" in out
 
 
+def test_a_wrong_sorting_probability_causes_errors_and_wrong_exits(capsys):
+    assert cli.main(["--duration", "300", "--missort-probability", "0.1"]) == 0
+    out = capsys.readouterr().out
+    engine = Engine(default_layout())
+    engine.set_missort_probability(0.1)
+    for _ in range(6000):
+        engine.step()
+    stats = engine.stats()
+    assert stats.errors > 0 and stats.misdelivered > 0
+    assert out.strip() == cli.format_summary(stats, 42, "full", 0.1)
+    assert "Layout full · seed 42 · wrong sorting 0.1 · 300.00 simulated s" in out
+
+
+@pytest.mark.parametrize("probability", ["-0.1", "1.5", "lots"])
+def test_invalid_probabilities_are_rejected(probability, capsys):
+    with pytest.raises(SystemExit) as error:
+        cli.main(["--missort-probability", probability])
+    assert error.value.code == 2
+    assert "--missort-probability" in capsys.readouterr().err
+
+
 def test_an_unknown_layout_is_rejected(capsys):
     with pytest.raises(SystemExit) as error:
         cli.main(["--layout", "large"])

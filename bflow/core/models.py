@@ -25,6 +25,11 @@ class Baggage:
     After exit ``conveyor_id`` is None again and ``exited_at_s`` is set;
     ``position_m`` keeps the last position. Travel time starts at
     ``entered_at_s``, excluding the wait at the entrance.
+
+    ``sorted_at_id`` is the last sorter that decided the bag's branch, so a
+    bag waiting at a sorter is decided only once. ``missorted_to_id`` is the
+    wrong output a sorting error sends the bag to; None while it follows its
+    destination.
     """
 
     id: str
@@ -35,10 +40,22 @@ class Baggage:
     position_m: float = 0.0
     entered_at_s: float | None = None
     exited_at_s: float | None = None
+    sorted_at_id: str | None = None
+    missorted_to_id: str | None = None
+
+    @property
+    def route_output_id(self) -> str:
+        """The output the plant sends the bag to: its destination unless missorted."""
+        return self.missorted_to_id if self.missorted_to_id is not None else self.destination_id
 
     def __post_init__(self) -> None:
         check_identifier("id", self.id)
         check_identifier("destination_id", self.destination_id)
+        for name in ("sorted_at_id", "missorted_to_id"):
+            if getattr(self, name) is not None:
+                check_identifier(name, getattr(self, name))
+        if self.missorted_to_id == self.destination_id:
+            raise ValueError("A missorted bag must be sent to another output")
         check_quantity("length_m", self.length_m, positive=True)
         check_quantity("position_m", self.position_m)
         check_quantity("generated_at_s", self.generated_at_s)

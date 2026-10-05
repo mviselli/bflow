@@ -95,6 +95,7 @@ throughput, and figures for each check-in desk, output and belt.
 | `--duration` | simulated seconds (multiple of 0.05) | `600` |
 | `--seed` | random seed; the same seed gives the same run | `42` |
 | `--layout` | `full` plant or `minimal` single belt | `full` |
+| `--missort-probability` | chance (0–1) that a sorter sends a bag down a wrong branch; each error counts once in Errors and the bag ends as a wrong exit | `0` |
 
 The command exits with status 1 if bags are lost or duplicated.
 

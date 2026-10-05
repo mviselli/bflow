@@ -95,6 +95,10 @@ class Engine:
         self._recent_delivery_ticks: deque[int] = deque()
         # Only the exits of the last tick: no unbounded history.
         self.exited_this_tick: tuple[Baggage, ...] = ()
+        # Wrong sorting: the chance that a sorter sends a bag down a wrong
+        # branch, and an operator's request to force it on the next bag.
+        self.missort_probability = 0.0
+        self.missort_forced = False
         self.events = EventLog()
         self._entrance_queued = {node.id: False for node in self.layout.inputs}
 
@@ -243,10 +247,39 @@ class Engine:
         self.events.record(self.tick, self.time_s, Severity.INFO, "input_rate_changed",
                            f"Arrival rate set to {rate_bags_s:g} bags/s", element_id=input_id)
 
+    def set_missort_probability(self, probability: float) -> None:
+        """Sets the chance of a wrong sorting at each sorter passage, from the next step.
+
+        Zero (the initial value) makes no random draw, so a run without
+        errors is the same as before they existed. Records an info event
+        when the value changes.
+        """
+        check_quantity("probability", probability)
+        if probability > 1:
+            raise ValueError("probability must be at most 1")
+        if probability == self.missort_probability:
+            return
+        self.missort_probability = probability
+        self.events.record(self.tick, self.time_s, Severity.INFO, "missort_probability_changed",
+                           f"Wrong sorting probability set to {probability:g}")
+
+    def force_missort(self) -> None:
+        """Makes the next bag decided at any sorter take a wrong branch.
+
+        Asking again before that bag arrives does nothing: one request, one
+        error. Records an info event for the request.
+        """
+        if self.missort_forced:
+            return
+        self.missort_forced = True
+        self.events.record(self.tick, self.time_s, Severity.INFO, "missort_forced",
+                           "Wrong sorting forced on the next bag")
+
     def step(self) -> None:
         """Completes one fixed step without reading real time or waiting."""
         self._tick += 1
         self._move()
+        self._sort()
         leaving = self._resolve_merges(self._evaluate_transfers())
         self._apply_transfers(leaving)
         self._forget_old_deliveries()
@@ -292,12 +325,61 @@ class Engine:
     def _next_conveyor(self, conveyor: Conveyor, baggage: Baggage) -> Conveyor | None:
         """The belt that receives the front bag of a belt; None when it ends at an output.
 
-        After a sorter it is the branch of the bag's destination.
+        After a sorter it is the branch leading to the bag's route output:
+        its destination, or the wrong output a sorting error chose.
         """
         target_id = conveyor.config.target_id
         if target_id in self.sorter_routes:
-            return self.conveyors[self.sorter_routes[target_id][baggage.destination_id]]
+            return self.conveyors[self.sorter_routes[target_id][baggage.route_output_id]]
         return self._next_conveyors.get(conveyor.config.id)
+
+    def _sort(self) -> None:
+        """Decides, once per passage, whether each sorter makes a sorting error.
+
+        A sorter decides for the front bag of the belt entering it as soon
+        as the bag's front edge reaches the end, whether or not its branch
+        has space; a bag waiting there is not decided again. A forced error
+        takes the first decided bag; otherwise the error happens with the
+        set probability (no draw at zero). A bag already missorted is not
+        decided again: it heads for its wrong output, with no second error.
+        """
+        for conveyor in self.conveyors.values():
+            sorter_id = conveyor.config.target_id
+            if sorter_id not in self.sorter_routes or not conveyor.baggage:
+                continue
+            baggage = conveyor.baggage[-1]
+            if (baggage.sorted_at_id == sorter_id
+                    or baggage.position_m < conveyor.config.length_m - baggage.length_m):
+                continue
+            baggage.sorted_at_id = sorter_id
+            if baggage.missorted_to_id is not None:
+                continue
+            if self.missort_forced:
+                self.missort_forced = False
+            elif (self.missort_probability == 0
+                  or self.rng.random() >= self.missort_probability):
+                continue
+            self._missort(baggage, sorter_id)
+
+    def _missort(self, baggage: Baggage, sorter_id: str) -> None:
+        """Sends the bag down a wrong branch, towards an output it does not belong to.
+
+        The branch is drawn among the sorter's other branches, then the
+        output among those after it, in layout order. This is the error
+        event; the arrival at the wrong output is classified, not counted
+        again.
+        """
+        right = self.sorter_routes[sorter_id][baggage.destination_id]
+        wrong = [belt.id for belt in self.layout.belts
+                 if belt.source_id == sorter_id and belt.id != right]
+        branch_id = self.rng.choice(wrong)
+        after = self._outputs_after(branch_id)
+        baggage.missorted_to_id = self.rng.choice([output_id for output_id in self._output_ids
+                                                   if output_id in after])
+        self.events.record(self.tick, self.time_s, Severity.ERROR, "wrong_sorting",
+                           f"Wrong sorting: sent down {branch_id} instead of towards "
+                           f"{baggage.destination_id}",
+                           element_id=sorter_id, baggage_id=baggage.id)
 
     def _has_entry_space(self, conveyor: Conveyor, baggage: Baggage) -> bool:
         """True if the bag fits at position zero, keeping the gap to the nearest bag."""
@@ -392,8 +474,12 @@ class Engine:
             self.correctly_delivered_by_output[output_id] += 1
             self._recent_delivery_ticks.append(self.tick)
         else:
+            # The classification of the arrival: the error was counted at the sorter.
             self.misdelivered_count += 1
             self.misdelivered_by_output[output_id] += 1
+            self.events.record(self.tick, self.time_s, Severity.INFO, "wrong_exit",
+                               f"Arrived at the wrong output (destination {baggage.destination_id})",
+                               element_id=output_id, baggage_id=baggage.id)
         self._total_travel_time_s += self.time_s - baggage.entered_at_s
 
     def _forget_old_deliveries(self) -> None:
