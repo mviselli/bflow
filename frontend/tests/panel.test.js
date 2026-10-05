@@ -18,14 +18,14 @@ const LAYOUT = {
   ],
 };
 
-function snapshot({ stopped = false, faulty = false, bags = 3, missortedTo = null } = {}) {
+function snapshot({ stopped = false, faulty = false, congested = false, bags = 3, missortedTo = null } = {}) {
   return {
     tick: 400,
     time_s: 20,
     running: true,
     speed: 1,
     inputs: [{ id: 'input-a', arrival_rate_bags_s: 0.15 }],
-    belts: [{ id: 'line', stopped, faulty }],
+    belts: [{ id: 'line', stopped, faulty, congested }],
     baggage: [{
       id: 'bag-7', destination_id: 'output-1', conveyor_id: 'line', position_m: 3.25,
       length_m: 0.6, entered_at_s: 12.5, missorted_to_id: missortedTo,
@@ -48,7 +48,7 @@ test('a belt shows its state, occupancy and connections from the snapshot', () =
   const content = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot());
   assert.equal(content.title, 'Belt line');
   assert.deepEqual(values(content), {
-    State: 'Running', Bags: '3 of 6', Occupancy: '50 %', Length: '5.0 m', Speed: '1.0 m/s',
+    State: 'Running', Congestion: 'None', Bags: '3 of 6', Occupancy: '50 %', Length: '5.0 m', Speed: '1.0 m/s',
     From: 'Check-in A1', To: 'Output BF 101',
   });
   assert.equal(content.occupancy, 0.5);
@@ -61,6 +61,13 @@ test('a stopped belt says so', () => {
   assert.equal(values(content).State, 'Stopped by the operator');
   assert.equal(content.state, 'stopped');
   assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: true });
+});
+
+test('a congested belt shows the warning, highlighted', () => {
+  const content = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ congested: true, bags: 6 }));
+  const row = content.rows.find((item) => item.label === 'Congestion');
+  assert.deepEqual(row, { label: 'Congestion', value: 'Warning · was above 80 % for 10 s', alert: true });
+  assert.equal(values(content).State, 'Running');
 });
 
 test('a faulty belt says so, and a fault wins over the operator\'s stop', () => {

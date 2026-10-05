@@ -2,8 +2,9 @@
 
 After each step a checker compares the engine with its state one tick
 earlier: baggage conservation, spacing, routing, the entrance queues,
-waiting at the end of a belt, the alternation at the merge and sorting
-errors (decided once, counted once, and the only cause of a wrong exit).
+waiting at the end of a belt, the alternation at the merge, sorting
+errors (decided once, counted once, and the only cause of a wrong exit) and
+the congestion warnings (start after 10 s above 80 %, clear below 60 %).
 """
 
 from dataclasses import replace
@@ -46,6 +47,9 @@ class PlantChecker:
         self.missorted = {}
         self.wrong_exits = 0
         self.last_event_id = engine.events.last_id
+        # Consecutive ticks each belt has been above 80 %, and its warning.
+        self.ticks_above = {belt_id: 0 for belt_id in engine.conveyors}
+        self.congested = {belt_id: False for belt_id in engine.conveyors}
         self.remember()
 
     def remember(self):
@@ -98,12 +102,14 @@ class PlantChecker:
         self.check_queues(entered)
         self.check_waiting_at_belt_ends(entered)
         self.check_merges(entered)
-        self.check_sorting_errors(on_belts)
+        events = [event for event in engine.events.recent if event.id > self.last_event_id]
+        self.check_sorting_errors(on_belts, events)
+        self.check_congestion(events)
+        self.last_event_id = engine.events.last_id
         self.remember()
 
-    def check_sorting_errors(self, on_belts):
+    def check_sorting_errors(self, on_belts, events):
         """A missort is decided once, never changes, and records exactly one error event."""
-        engine = self.engine
         new = {}
         for bag in on_belts:
             if bag.missorted_to_id is None:
@@ -113,12 +119,28 @@ class PlantChecker:
             else:
                 assert bag.missorted_to_id != bag.destination_id
                 new[bag.id] = bag.missorted_to_id
-        events = [event for event in engine.events.recent if event.id > self.last_event_id]
         errors = {event.baggage_id for event in events if event.kind == "wrong_sorting"}
         assert errors == set(new)
         assert len([event for event in events if event.kind == "wrong_sorting"]) == len(new)
         self.missorted.update(new)
-        self.last_event_id = engine.events.last_id
+
+    def check_congestion(self, events):
+        """Congested after 201 ticks in a row above 80 % (10 s), until below 60 %.
+
+        Each start is one warning event and each clearing one info event.
+        """
+        engine = self.engine
+        started = {event.element_id for event in events if event.kind == "congestion_started"}
+        cleared = {event.element_id for event in events if event.kind == "congestion_cleared"}
+        for belt_id, conveyor in engine.conveyors.items():
+            occupancy = len(conveyor.baggage) / engine.belt_capacities[belt_id]
+            self.ticks_above[belt_id] = self.ticks_above[belt_id] + 1 if occupancy > 0.8 else 0
+            was = self.congested[belt_id]
+            expected = occupancy >= 0.6 if was else self.ticks_above[belt_id] > 200
+            assert conveyor.congested == expected, (belt_id, occupancy)
+            assert (belt_id in started) == (expected and not was)
+            assert (belt_id in cleared) == (was and not expected)
+            self.congested[belt_id] = expected
 
     def check_spacing(self, conveyor):
         gap = self.engine.layout.min_gap_m
@@ -338,6 +360,26 @@ def test_two_forced_errors_give_two_errors_and_two_wrong_exits():
     assert (stats.errors, stats.misdelivered) == (2, 2)
 
 
+def test_a_stopped_branch_congests_the_line_behind_it_and_the_warnings_clear_after_restart():
+    engine = run(*SCENARIOS["demo: branch 2 stopped for 120 s"])
+    started = [event.element_id for event in engine.events.recent
+               if event.kind == "congestion_started"]
+    # The line backs up to every desk: each belt on the way warns once (line-2
+    # again while the backlog drains after the restart).
+    assert set(started) == set(engine.conveyors) - {"line-3", "line-4", "branch-1", "branch-2",
+                                                    "branch-3"}
+    assert engine.stats().warnings == len(started) == len(set(started)) + 1
+    # Once the backlog has gone, every warning has cleared.
+    for _ in range(6000):
+        engine.step()
+    assert not any(conveyor.congested for conveyor in engine.conveyors.values())
+
+
+def test_the_demo_plant_below_capacity_raises_no_congestion():
+    engine = run(*SCENARIOS["demo: normal flow"])
+    assert engine.stats().warnings == 0
+
+
 def unfair_merge(engine):
     """The merge always lets the last ready belt through: no turns."""
     def resolve(ready):
@@ -391,8 +433,21 @@ def sorter_changes_its_mind(engine):
     engine._sort = again
 
 
+def impatient_congestion(engine):
+    """Congestion starts after 5 s above 80 % instead of 10 s."""
+    update = engine._update_congestion
+
+    def sooner():
+        for belt_id, since in engine._above_since.items():
+            if since is not None and since == engine.tick - 1:
+                engine._above_since[belt_id] = since - 100
+        update()
+    engine._update_congestion = sooner
+
+
 @pytest.mark.parametrize("sabotage", [unfair_merge, lazy_feeder, lazy_admission, wrong_branch,
-                                      error_counted_twice, sorter_changes_its_mind])
+                                      error_counted_twice, sorter_changes_its_mind,
+                                      impatient_congestion])
 def test_the_checker_notices_a_broken_rule(sabotage):
     engine = Engine(with_rates(1))
     checker = PlantChecker(engine)

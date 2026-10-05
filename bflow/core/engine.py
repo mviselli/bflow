@@ -14,6 +14,11 @@ STEP_MS = 50
 STEP_SECONDS = STEP_MS / 1000
 # Throughput counts the correct deliveries of the last 60 simulated seconds.
 THROUGHPUT_WINDOW_TICKS = 60 * 1000 // STEP_MS
+# Congestion: a belt fuller than CONGESTION_ON for CONGESTION_DELAY_TICKS
+# (10 simulated seconds) is congested until it is emptier than CONGESTION_OFF.
+CONGESTION_ON = 0.8
+CONGESTION_OFF = 0.6
+CONGESTION_DELAY_TICKS = 10 * 1000 // STEP_MS
 
 
 class Engine:
@@ -99,6 +104,9 @@ class Engine:
         # branch, and an operator's request to force it on the next bag.
         self.missort_probability = 0.0
         self.missort_forced = False
+        # Tick since which each belt has stayed above CONGESTION_ON; None
+        # when it is not above it.
+        self._above_since: dict[str, int | None] = {belt.id: None for belt in self.layout.belts}
         self.events = EventLog()
         self._entrance_queued = {node.id: False for node in self.layout.inputs}
 
@@ -286,6 +294,7 @@ class Engine:
         self._generate()
         self._admit()
         self._update_entrance_queues()
+        self._update_congestion()
 
     def _move(self) -> None:
         """Advances each running belt from the exit towards the entrance.
@@ -553,3 +562,36 @@ class Engine:
                 kind, message = "entrance_queue_cleared", "Entrance queue cleared"
             self.events.record(self.tick, self.time_s, Severity.INFO, kind, message,
                                element_id=input_id)
+
+    def _update_congestion(self) -> None:
+        """Starts and clears each belt's congestion warning, with hysteresis.
+
+        Occupancy is the belt's bags over its capacity, as in the statistics.
+        A belt above CONGESTION_ON (strictly) for CONGESTION_DELAY_TICKS
+        becomes congested: one warning event. It stays congested until its
+        occupancy falls strictly below CONGESTION_OFF: one info event. Between
+        the two thresholds nothing changes. The time is counted in ticks, so
+        it stands still while paused; a stopped or faulty belt can be
+        congested too.
+        """
+        for belt_id, conveyor in self.conveyors.items():
+            occupancy = len(conveyor.baggage) / self.belt_capacities[belt_id]
+            if occupancy > CONGESTION_ON:
+                if self._above_since[belt_id] is None:
+                    self._above_since[belt_id] = self.tick
+            else:
+                self._above_since[belt_id] = None
+            since = self._above_since[belt_id]
+            if (not conveyor.congested and since is not None
+                    and self.tick - since >= CONGESTION_DELAY_TICKS):
+                conveyor.congested = True
+                self.events.record(self.tick, self.time_s, Severity.WARNING,
+                                   "congestion_started",
+                                   "Congestion: occupancy above 80 % for 10 s",
+                                   element_id=belt_id)
+            elif conveyor.congested and occupancy < CONGESTION_OFF:
+                conveyor.congested = False
+                self.events.record(self.tick, self.time_s, Severity.INFO,
+                                   "congestion_cleared",
+                                   "Congestion cleared: occupancy below 60 %",
+                                   element_id=belt_id)

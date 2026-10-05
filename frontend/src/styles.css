@@ -50,6 +50,7 @@ canvas { display: block; touch-action: none; }
 #panel[data-state="stopped"] dd:first-of-type { color: #f0a36b; }
 #panel[data-state="faulty"] dd:first-of-type { color: #ff7b7b; font-weight: 600; }
 #panel[data-state="missorted"] dd:nth-of-type(2) { color: #ff7b7b; font-weight: 600; }
+#panel dd.alert { color: #f0a36b; font-weight: 600; }
 .panel-tag { margin-bottom: 10px !important; color: #e8eef3; font-weight: 600; }
 .panel-tag span {
   display: inline-block; min-width: 1.6em; margin-right: 4px; padding: 0 4px; border-radius: 4px;

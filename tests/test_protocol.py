@@ -224,9 +224,10 @@ def test_snapshot_has_every_belt_with_its_stop_fault_and_occupancy_in_layout_ord
     engine.stop_belt("line-2")
     engine.fault_belt("line-2")
     engine.fault_belt("branch-1")
+    engine.conveyors["line-1"].congested = True
     snapshot = snapshot_message(engine, running=False)
-    assert [(belt.id, belt.stopped, belt.faulty) for belt in snapshot.belts] == [
-        (belt.id, belt.id == "line-2", belt.id in {"line-2", "branch-1"})
+    assert [(belt.id, belt.stopped, belt.faulty, belt.congested) for belt in snapshot.belts] == [
+        (belt.id, belt.id == "line-2", belt.id in {"line-2", "branch-1"}, belt.id == "line-1")
         for belt in engine.layout.belts]
     line = next(belt for belt in snapshot.stats.belts if belt.belt_id == "line-1")
     assert (line.bags, line.capacity) == (len(engine.conveyors["line-1"].baggage), 7)

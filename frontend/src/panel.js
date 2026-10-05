@@ -47,6 +47,11 @@ function beltContent(id, layout, snapshot) {
   const stats = snapshot?.stats.belts.find((item) => item.belt_id === id);
   const rows = [
     { label: 'State', value: beltStateText(state) },
+    {
+      label: 'Congestion',
+      value: !state ? '—' : state.congested ? 'Warning · was above 80 % for 10 s' : 'None',
+      alert: Boolean(state?.congested),
+    },
     { label: 'Bags', value: stats ? `${stats.bags} of ${stats.capacity}` : '—' },
     { label: 'Occupancy', value: stats ? `${Math.round(stats.occupancy * 100)} %` : '—' },
     { label: 'Length', value: metres(belt.length_m) },
@@ -226,11 +231,12 @@ export function createPanel(element, { onCommand = () => {} } = {}) {
         body.append(tag);
       }
       const list = document.createElement('dl');
-      for (const { label, value } of content.rows) {
+      for (const { label, value, alert } of content.rows) {
         const term = document.createElement('dt');
         const detail = document.createElement('dd');
         term.textContent = label;
         detail.textContent = value;
+        if (alert) detail.className = 'alert';
         list.append(term, detail);
       }
       body.append(list);

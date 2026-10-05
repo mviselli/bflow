@@ -91,12 +91,15 @@ class Conveyor:
     ``faulty`` is a fault, cleared only by a repair, never by a restart. The
     two are independent: a halted belt (either of them) neither moves nor
     hands over bags, but still receives one when its entrance has space.
+    ``congested`` is the engine's congestion warning, active from its start
+    to its clearing (see Engine._update_congestion).
     """
 
     config: BeltConfig
     baggage: list[Baggage] = field(default_factory=list)
     stopped: bool = False
     faulty: bool = False
+    congested: bool = False
 
     @property
     def halted(self) -> bool:

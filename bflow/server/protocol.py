@@ -125,14 +125,17 @@ class InputState(Message):
 
 
 class BeltState(Message):
-    """One belt's operator stop (not the global pause) and fault.
+    """One belt's operator stop (not the global pause), fault and congestion.
 
-    The two are independent: the belt moves only when neither is set.
+    Stop and fault are independent: the belt moves only when neither is
+    set. ``congested`` is the engine's congestion warning, active from its
+    start to its clearing.
     """
 
     id: str = Field(min_length=1)
     stopped: bool
     faulty: bool
+    congested: bool
 
 
 class BeltStatsState(Message):
@@ -238,7 +241,8 @@ def snapshot_message(engine: Engine, *, running: bool, speed: int = 1, run: int 
         speed=speed,
         inputs=[InputState(id=input_id, arrival_rate_bags_s=rate)
                 for input_id, rate in engine.arrival_rates.items()],
-        belts=[BeltState(id=belt_id, stopped=conveyor.stopped, faulty=conveyor.faulty)
+        belts=[BeltState(id=belt_id, stopped=conveyor.stopped, faulty=conveyor.faulty,
+                         congested=conveyor.congested)
                for belt_id, conveyor in engine.conveyors.items()],
         missort_probability=engine.missort_probability,
         missort_forced=engine.missort_forced,
