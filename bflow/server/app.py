@@ -161,7 +161,7 @@ async def _receive_commands(websocket: WebSocket, runner: Runner) -> None:
             runner.submit(parse_command(raw))
         except ValidationError as error:
             await websocket.send_text(ErrorMessage(message=_describe(error)).model_dump_json())
-        except ValueError as error:  # a belt or input that is not in the plant
+        except ValueError as error:  # a belt, input or alarm that does not exist
             await websocket.send_text(ErrorMessage(message=f"Invalid command: {error}").model_dump_json())
 
 

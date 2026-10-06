@@ -240,6 +240,26 @@ def test_a_fault_reaches_the_snapshot_as_an_error_and_a_repair_clears_it():
         assert repaired["stats"]["errors"] == 1
 
 
+def test_an_alarm_is_acknowledged_through_the_websocket_and_the_belt_stays_faulty():
+    app, _, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        ws.send_text('{"type": "acknowledge_alarm", "alarm_id": 1}')
+        assert receive_until(ws, is_error)["message"] == "Invalid command: Unknown alarm: 1"
+        ws.send_text('{"type": "fault_belt", "belt_id": "branch-3"}')
+        active = receive_until(ws, lambda m: m["type"] == "snapshot" and m["alarms"])
+        assert [(alarm["id"], alarm["state"], alarm["element_id"])
+                for alarm in active["alarms"]] == [(1, "active", "branch-3")]
+        ws.send_text('{"type": "acknowledge_alarm", "alarm_id": 1}')
+        acknowledged = receive_until(ws, lambda m: m["type"] == "snapshot"
+                                     and m["alarms"][0]["state"] == "acknowledged")
+        assert acknowledged["events"][-1]["kind"] == "alarm_acknowledged"
+        assert any(belt["faulty"] for belt in acknowledged["belts"])
+        ws.send_text('{"type": "repair_belt", "belt_id": "branch-3"}')
+        resolved = receive_until(ws, lambda m: m["type"] == "snapshot"
+                                 and m["alarms"][0]["state"] == "resolved")
+        assert resolved["events"][-1]["alarm_id"] == 1
+
+
 def test_a_forced_wrong_sorting_reaches_the_snapshot():
     app, _, _ = make_app()
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:

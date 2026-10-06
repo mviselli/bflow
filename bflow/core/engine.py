@@ -4,7 +4,7 @@ from collections import deque
 from random import Random
 
 from bflow.core.checks import check_quantity
-from bflow.core.events import EventLog, Severity
+from bflow.core.events import Alarm, EventLog, Severity
 from bflow.core.layout import LayoutConfig, minimal_layout
 from bflow.core.models import Baggage, Conveyor
 from bflow.core.stats import BeltStats, InputStats, OutputStats, Stats
@@ -24,6 +24,9 @@ PROLONGED_WAIT_S = 30.0
 # A bag advances only if its position grows by more than this: smaller
 # changes are rounding, not movement.
 MOVE_EPSILON_M = 1e-9
+# Resolved alarms kept for the console, the newest ones: the event log keeps
+# the full story.
+MAX_RESOLVED_ALARMS = 20
 
 
 class Engine:
@@ -113,6 +116,11 @@ class Engine:
         # when it is not above it.
         self._above_since: dict[str, int | None] = {belt.id: None for belt in self.layout.belts}
         self.events = EventLog()
+        # Alarms not yet resolved (active or acknowledged), in the order they
+        # were raised, by id; then the latest resolved ones, oldest first.
+        self.alarms: dict[int, Alarm] = {}
+        self.resolved_alarms: deque[Alarm] = deque(maxlen=MAX_RESOLVED_ALARMS)
+        self.last_alarm_id = 0
         self._entrance_queued = {node.id: False for node in self.layout.inputs}
 
     @property
@@ -215,28 +223,28 @@ class Engine:
         The belt halts like a stopped one, but restart_belt does not clear the
         fault: only repair_belt does. The operator's stop is independent, so a
         belt stopped during the fault stays stopped after the repair. Records
-        an error event when the fault starts; a fault on a faulty belt does
-        nothing.
+        an error alarm, with its event, when the fault starts; a fault on a
+        faulty belt does nothing.
         """
         conveyor = self._conveyor(belt_id)
         if conveyor.faulty:
             return
         conveyor.faulty = True
-        self.events.record(self.tick, self.time_s, Severity.ERROR, "belt_fault",
-                           "Belt fault: halted until repaired", element_id=belt_id)
+        self._raise_alarm("belt_fault", Severity.ERROR, "belt_fault",
+                          "Belt fault: halted until repaired", element_id=belt_id)
 
     def repair_belt(self, belt_id: str) -> None:
         """Repairs a faulty belt, from the next step; does nothing on a working one.
 
         The belt moves again unless the operator also stopped it. The repair
-        is information: it resolves the fault without counting a new error.
+        is information: it resolves the fault's alarm without counting a new
+        error.
         """
         conveyor = self._conveyor(belt_id)
         if not conveyor.faulty:
             return
         conveyor.faulty = False
-        self.events.record(self.tick, self.time_s, Severity.INFO, "belt_repaired",
-                           "Belt repaired", element_id=belt_id)
+        self._resolve_alarm("belt_fault", "belt_repaired", "Belt repaired", element_id=belt_id)
 
     def _conveyor(self, belt_id: str) -> Conveyor:
         if belt_id not in self.conveyors:
@@ -287,6 +295,52 @@ class Engine:
         self.missort_forced = True
         self.events.record(self.tick, self.time_s, Severity.INFO, "missort_forced",
                            "Wrong sorting forced on the next bag")
+
+    def acknowledge_alarm(self, alarm_id: int) -> None:
+        """Records that the operator has seen an alarm; it repairs nothing.
+
+        The condition goes on (a faulty belt stays halted) and the alarm
+        stays open, acknowledged, until the condition ends. Acknowledging
+        an acknowledged or resolved alarm does nothing; an id never raised
+        in this run is refused. Records an info event.
+        """
+        if (isinstance(alarm_id, bool) or not isinstance(alarm_id, int)
+                or not 1 <= alarm_id <= self.last_alarm_id):
+            raise ValueError(f"Unknown alarm: {alarm_id!r}")
+        alarm = self.alarms.get(alarm_id)
+        if alarm is None or alarm.acknowledged_at_s is not None:
+            return
+        alarm.acknowledged_at_s = self.time_s
+        self.events.record(self.tick, self.time_s, Severity.INFO, "alarm_acknowledged",
+                           f"Alarm acknowledged: {alarm.message}",
+                           element_id=alarm.element_id, baggage_id=alarm.baggage_id,
+                           alarm_id=alarm.id)
+
+    def _raise_alarm(self, kind: str, severity: Severity, event_kind: str, message: str, *,
+                     element_id: str, baggage_id: str | None = None) -> None:
+        """Opens an active alarm for a condition that has just started, with its event."""
+        self.last_alarm_id += 1
+        alarm = Alarm(self.last_alarm_id, kind, severity, message, element_id, baggage_id,
+                      self.time_s)
+        self.alarms[alarm.id] = alarm
+        self.events.record(self.tick, self.time_s, severity, event_kind, message,
+                           element_id=element_id, baggage_id=baggage_id, alarm_id=alarm.id)
+
+    def _resolve_alarm(self, kind: str, event_kind: str, message: str, *,
+                       element_id: str | None, baggage_id: str | None = None) -> None:
+        """Resolves the open alarm of a condition that has just ended, with an info event.
+
+        A bag's alarm is found by the bag, a belt's by the belt: each
+        condition has at most one open alarm.
+        """
+        alarm = next(alarm for alarm in self.alarms.values() if alarm.kind == kind
+                     and (alarm.baggage_id == baggage_id if baggage_id is not None
+                          else alarm.element_id == element_id))
+        del self.alarms[alarm.id]
+        alarm.resolved_at_s = self.time_s
+        self.resolved_alarms.append(alarm)
+        self.events.record(self.tick, self.time_s, Severity.INFO, event_kind, message,
+                           element_id=element_id, baggage_id=baggage_id, alarm_id=alarm.id)
 
     def step(self) -> None:
         """Completes one fixed step without reading real time or waiting."""
@@ -577,8 +631,9 @@ class Engine:
 
         Occupancy is the belt's bags over its capacity, as in the statistics.
         A belt above CONGESTION_ON (strictly) for CONGESTION_DELAY_TICKS
-        becomes congested: one warning event. It stays congested until its
-        occupancy falls strictly below CONGESTION_OFF: one info event. Between
+        becomes congested: one warning alarm. It stays congested until its
+        occupancy falls strictly below CONGESTION_OFF, which resolves the
+        alarm with one info event. Between
         the two thresholds nothing changes. The time is counted in ticks, so
         it stands still while paused; a stopped or faulty belt can be
         congested too.
@@ -594,16 +649,14 @@ class Engine:
             if (not conveyor.congested and since is not None
                     and self.tick - since >= CONGESTION_DELAY_TICKS):
                 conveyor.congested = True
-                self.events.record(self.tick, self.time_s, Severity.WARNING,
-                                   "congestion_started",
-                                   "Congestion: occupancy above 80 % for 10 s",
-                                   element_id=belt_id)
+                self._raise_alarm("congestion", Severity.WARNING, "congestion_started",
+                                  "Congestion: occupancy above 80 % for 10 s",
+                                  element_id=belt_id)
             elif conveyor.congested and occupancy < CONGESTION_OFF:
                 conveyor.congested = False
-                self.events.record(self.tick, self.time_s, Severity.INFO,
-                                   "congestion_cleared",
-                                   "Congestion cleared: occupancy below 60 %",
-                                   element_id=belt_id)
+                self._resolve_alarm("congestion", "congestion_cleared",
+                                    "Congestion cleared: occupancy below 60 %",
+                                    element_id=belt_id)
 
     def _advanced(self, baggage: Baggage) -> None:
         """Notes that a bag advanced this tick, resolving its prolonged wait if any.
@@ -614,10 +667,9 @@ class Engine:
         """
         if baggage.prolonged_wait:
             baggage.prolonged_wait = False
-            self.events.record(self.tick, self.time_s, Severity.INFO,
-                               "prolonged_wait_resolved",
-                               f"Moving again after {self.time_s - baggage.moved_at_s:.1f} s",
-                               element_id=baggage.conveyor_id, baggage_id=baggage.id)
+            self._resolve_alarm("prolonged_wait", "prolonged_wait_resolved",
+                                f"Moving again after {self.time_s - baggage.moved_at_s:.1f} s",
+                                element_id=baggage.conveyor_id, baggage_id=baggage.id)
         baggage.moved_at_s = self.time_s
 
     def _update_prolonged_waits(self) -> None:
@@ -625,8 +677,8 @@ class Engine:
 
         The bag stays where it is and is still counted in transit; it waits
         for space ahead, for its turn, or for its belt to be restarted or
-        repaired. One warning event per occurrence; the warning resolves when
-        the bag advances (see _advanced). Time is simulated time, so a pause
+        repaired. One warning alarm per occurrence; it resolves when the bag
+        advances (see _advanced). Time is simulated time, so a pause
         stands still. The tiny margin keeps 30 s of 50 ms steps from being
         lost to rounding.
         """
@@ -635,7 +687,7 @@ class Engine:
                 if (not baggage.prolonged_wait
                         and self.time_s - baggage.moved_at_s >= PROLONGED_WAIT_S - 1e-9):
                     baggage.prolonged_wait = True
-                    self.events.record(self.tick, self.time_s, Severity.WARNING,
-                                       "prolonged_wait_started",
-                                       "Prolonged wait: not moved for 30 s",
-                                       element_id=conveyor.config.id, baggage_id=baggage.id)
+                    self._raise_alarm("prolonged_wait", Severity.WARNING,
+                                      "prolonged_wait_started",
+                                      "Prolonged wait: not moved for 30 s",
+                                      element_id=conveyor.config.id, baggage_id=baggage.id)

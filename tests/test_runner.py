@@ -8,7 +8,7 @@ from bflow.core.engine import Engine
 from bflow.core.layout import default_layout
 from bflow.server import runner as runner_module
 from bflow.server.protocol import (
-    FaultBeltCommand, ForceMissortCommand, PauseCommand, RepairBeltCommand, ResetCommand,
+    AcknowledgeAlarmCommand, FaultBeltCommand, ForceMissortCommand, PauseCommand, RepairBeltCommand, ResetCommand,
     RestartBeltCommand, SetMissortProbabilityCommand, SetRateCommand, SetSpeedCommand,
     StartCommand, StopBeltCommand,
 )
@@ -283,6 +283,64 @@ def test_neither_restart_nor_start_clears_a_fault_only_repair_does():
     assert not runner.engine.conveyors["line-1"].faulty
 
 
+def acknowledge(alarm_id):
+    return AcknowledgeAlarmCommand(type="acknowledge_alarm", alarm_id=alarm_id)
+
+
+def test_an_acknowledged_fault_stays_until_the_repair_and_pause_freezes_its_age():
+    runner, clock = make_runner()
+    runner.submit(START)
+    runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-1"))
+    runner.update()
+    clock.now += 1
+    runner.update()
+    runner.submit(acknowledge(1))
+    runner.update()
+    alarm = runner.engine.alarms[1]
+    assert (alarm.state, alarm.raised_at_s, alarm.acknowledged_at_s) == ("acknowledged", 0, 1.0)
+    assert runner.engine.conveyors["line-1"].faulty
+    # Paused, real time passes but the alarm's age does not.
+    runner.submit(PAUSE)
+    runner.update()
+    clock.now += 30
+    runner.update()
+    assert runner.engine.time_s - alarm.raised_at_s == 1.0
+    runner.submit(START)
+    runner.submit(RepairBeltCommand(type="repair_belt", belt_id="line-1"))
+    runner.update()
+    assert (alarm.state, alarm.resolved_at_s) == ("resolved", 1.0)
+    assert recorded(runner)[1:] == [(0, "fault_belt"), (20, "acknowledge_alarm"), (20, "pause"),
+                                    (20, "start"), (20, "repair_belt")]
+
+
+def test_an_alarm_not_raised_yet_is_refused_and_a_reset_clears_the_alarms():
+    runner, _ = make_runner()
+    with pytest.raises(ValueError, match="Unknown alarm"):
+        runner.submit(acknowledge(1))
+    runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-1"))
+    runner.update()
+    runner.submit(acknowledge(1))
+    runner.submit(ResetCommand(type="reset"))
+    runner.update()
+    assert runner.engine.alarms == {}
+    runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-1"))
+    runner.update()
+    assert runner.engine.alarms[1].state == "active"
+
+
+def test_an_acknowledgement_queued_behind_a_reset_is_dropped():
+    # Checked against the old run's alarm 1, applied after the reset: the
+    # new run has no alarm 1, so nothing happens and nothing is recorded.
+    runner, _ = make_runner()
+    runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-1"))
+    runner.update()
+    runner.submit(ResetCommand(type="reset"))
+    runner.submit(acknowledge(1))
+    runner.update()
+    assert recorded(runner) == [(0, "reset")]
+    assert runner.engine.last_alarm_id == 0
+
+
 @pytest.mark.parametrize("command", [
     StopBeltCommand(type="stop_belt", belt_id="belt-x"),
     RestartBeltCommand(type="restart_belt", belt_id="input-a1"),
@@ -367,11 +425,12 @@ def test_replaying_the_record_at_the_same_ticks_gives_the_same_run():
                RestartBeltCommand(type="restart_belt", belt_id="branch-1"),
                START,
                FaultBeltCommand(type="fault_belt", belt_id="island-a-3"),
+               acknowledge(1),
                SetMissortProbabilityCommand(type="set_missort_probability", probability=0.3),
                ForceMissortCommand(type="force_missort"),
                RepairBeltCommand(type="repair_belt", belt_id="island-a-3"),
                SetRateCommand(type="set_rate", input_id="input-a2", rate_bags_s=0.0)]
-    for step in range(620):
+    for step in range(680):
         clock.now += 0.013 + (step % 7) * 0.004
         if step % 60 == 30 and actions:
             runner.submit(actions.pop(0))
@@ -387,5 +446,8 @@ def test_replaying_the_record_at_the_same_ticks_gives_the_same_run():
     assert not commands
     assert replay.stats() == runner.engine.stats()
     assert replay.events.counts == runner.engine.events.counts
+    assert [(alarm.id, alarm.state) for alarm in replay.resolved_alarms] == [
+        (alarm.id, alarm.state) for alarm in runner.engine.resolved_alarms]
+    assert any(alarm.acknowledged_at_s for alarm in replay.resolved_alarms)
     assert [(b.id, b.conveyor_id, b.position_m) for c in replay.conveyors.values() for b in c.baggage] \
         == [(b.id, b.conveyor_id, b.position_m) for c in runner.engine.conveyors.values() for b in c.baggage]

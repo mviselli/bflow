@@ -9,6 +9,7 @@ from bflow.core.engine import STEP_MS, Engine
 from bflow.core.events import Severity
 from bflow.core.layout import default_layout, minimal_layout
 from bflow.server.protocol import (
+    AcknowledgeAlarmCommand,
     CommandRecord,
     ErrorMessage,
     FaultBeltCommand,
@@ -55,6 +56,7 @@ def run(engine: Engine, ticks: int) -> Engine:
     ('{"type": "set_missort_probability", "probability": 0.1}', SetMissortProbabilityCommand),
     ('{"type": "set_missort_probability", "probability": 1}', SetMissortProbabilityCommand),
     ('{"type": "force_missort"}', ForceMissortCommand),
+    ('{"type": "acknowledge_alarm", "alarm_id": 3}', AcknowledgeAlarmCommand),
 ])
 def test_known_commands_are_parsed(raw, expected):
     assert isinstance(parse_command(raw), expected)
@@ -85,6 +87,11 @@ def test_known_commands_are_parsed(raw, expected):
     '{"type": "set_missort_probability"}',
     '{"type": "force_missort", "bag": "bag-1"}',
     '{"type": "reset", "seed": 7}',
+    '{"type": "acknowledge_alarm"}',
+    '{"type": "acknowledge_alarm", "alarm_id": 0}',
+    '{"type": "acknowledge_alarm", "alarm_id": 1.5}',
+    '{"type": "acknowledge_alarm", "alarm_id": "1"}',
+    '{"type": "acknowledge_alarm", "alarm_id": 1, "all": true}',
 ])
 def test_invalid_commands_are_rejected(raw):
     with pytest.raises(ValidationError):
@@ -264,6 +271,42 @@ def test_snapshot_reports_when_each_bag_last_moved_and_its_prolonged_wait():
     assert not all(waiting for _, waiting in sent.values())
 
 
+def test_snapshot_lists_open_alarms_then_the_latest_resolved_ones():
+    engine = Engine(default_layout())
+    assert snapshot_message(engine, running=False).alarms == []
+    engine = run(engine, 20)
+    engine.fault_belt("line-2")
+    engine.fault_belt("branch-1")
+    engine.step()
+    engine.acknowledge_alarm(1)
+    engine.repair_belt("branch-1")
+    snapshot = snapshot_message(engine, running=False)
+    assert [alarm.model_dump() for alarm in snapshot.alarms] == [
+        {"id": 1, "kind": "belt_fault", "severity": "error", "state": "acknowledged",
+         "message": "Belt fault: halted until repaired", "element_id": "line-2",
+         "baggage_id": None, "raised_at_s": 1.0, "acknowledged_at_s": 1.05,
+         "resolved_at_s": None},
+        {"id": 2, "kind": "belt_fault", "severity": "error", "state": "resolved",
+         "message": "Belt fault: halted until repaired", "element_id": "branch-1",
+         "baggage_id": None, "raised_at_s": 1.0, "acknowledged_at_s": None,
+         "resolved_at_s": 1.05},
+    ]
+    # The events say which alarm they concern.
+    assert [(event.kind, event.alarm_id) for event in snapshot.events][-4:] == [
+        ("belt_fault", 1), ("belt_fault", 2), ("alarm_acknowledged", 1), ("belt_repaired", 2)]
+
+
+def test_snapshot_alarms_of_bags_name_the_bag_and_its_belt():
+    engine = run(Engine(default_layout()), 600)
+    engine.fault_belt("line-1")
+    engine = run(engine, 800)
+    sent = {alarm.baggage_id: alarm.element_id for alarm in snapshot_message(
+        engine, running=True).alarms if alarm.kind == "prolonged_wait"}
+    assert sent == {bag.id: bag.conveyor_id for conveyor in engine.conveyors.values()
+                    for bag in conveyor.baggage if bag.prolonged_wait}
+    assert sent
+
+
 def test_snapshot_carries_only_new_events():
     engine = Engine()
     engine.events.record(1, 0.05, Severity.INFO, "first", "First")
@@ -273,6 +316,7 @@ def test_snapshot_carries_only_new_events():
     assert event.model_dump() == {
         "tick": 2, "time_s": 0.1, "id": 2, "severity": Severity.WARNING,
         "kind": "second", "message": "Second", "element_id": "belt-1", "baggage_id": None,
+        "alarm_id": None,
     }
     assert snapshot_message(engine, running=False, after_event_id=2).events == []
 

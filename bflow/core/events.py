@@ -1,9 +1,14 @@
-"""Engine events with progressive identifiers and a bounded history.
+"""Engine events with progressive identifiers and a bounded history, and alarms.
 
 An event describes a change, not a repeated state: for a condition the start
 and the resolution are recorded, never an identical event at every tick.
 Per-severity counts are cumulative and do not depend on the retained history,
 which keeps only the most recent events.
+
+An alarm is a condition that lasts (a fault, a congestion, a prolonged
+wait): it is active from its start, acknowledged when the operator has seen
+it, and resolved when the condition ends. The engine owns the alarms; each
+change of state is also an event.
 """
 
 from collections import deque
@@ -34,6 +39,44 @@ class Event:
     message: str
     element_id: str | None = None
     baggage_id: str | None = None
+    alarm_id: int | None = None
+
+
+class AlarmState(StrEnum):
+    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+
+@dataclass
+class Alarm:
+    """A lasting condition of a belt or a bag, raised at ``raised_at_s``.
+
+    ``kind`` is the condition (``belt_fault``, ``congestion`` or
+    ``prolonged_wait``). Acknowledging records that the operator has seen
+    the alarm: it changes nothing in the plant, so an acknowledged fault
+    still needs a repair. Only the end of the condition resolves the alarm,
+    acknowledged or not. Times are simulated seconds, so they stand still
+    while the simulation is paused.
+    """
+
+    id: int
+    kind: str
+    severity: Severity
+    message: str
+    element_id: str | None
+    baggage_id: str | None
+    raised_at_s: float
+    acknowledged_at_s: float | None = None
+    resolved_at_s: float | None = None
+
+    @property
+    def state(self) -> AlarmState:
+        if self.resolved_at_s is not None:
+            return AlarmState.RESOLVED
+        if self.acknowledged_at_s is not None:
+            return AlarmState.ACKNOWLEDGED
+        return AlarmState.ACTIVE
 
 
 class EventLog:
@@ -70,10 +113,11 @@ class EventLog:
         *,
         element_id: str | None = None,
         baggage_id: str | None = None,
+        alarm_id: int | None = None,
     ) -> Event:
         self._last_id += 1
         event = Event(self._last_id, tick, time_s, Severity(severity), kind, message,
-                      element_id, baggage_id)
+                      element_id, baggage_id, alarm_id)
         self.recent.append(event)
         self.counts[event.severity] += 1
         return event

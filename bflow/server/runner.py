@@ -23,7 +23,7 @@ from collections.abc import Callable
 from bflow.core.engine import STEP_MS, Engine
 from bflow.core.layout import default_layout
 from bflow.server.protocol import (
-    BELT_COMMANDS, Command, CommandRecord, FaultBeltCommand, ForceMissortCommand, PauseCommand,
+    BELT_COMMANDS, AcknowledgeAlarmCommand, Command, CommandRecord, FaultBeltCommand, ForceMissortCommand, PauseCommand,
     RepairBeltCommand, ResetCommand, RestartBeltCommand, SetMissortProbabilityCommand,
     SetRateCommand, SetSpeedCommand, StartCommand, StopBeltCommand,
 )
@@ -68,9 +68,11 @@ class Runner:
     def submit(self, command: Command) -> None:
         """Queues a validated command; it is applied at the start of the next update.
 
-        Raises ValueError for a belt or input that is not in the plant, so
-        the sender can be told at once. The layout never changes, not even
-        on reset, so the check stays valid until the command is applied.
+        Raises ValueError for a belt or input that is not in the plant, or
+        an alarm the engine has not raised, so the sender can be told at
+        once. The layout never changes, not even on reset, so the check
+        stays valid until the command is applied; alarms start over at a
+        reset (see _apply).
         """
         layout = self.engine.layout
         if isinstance(command, BELT_COMMANDS):
@@ -79,6 +81,9 @@ class Runner:
         elif isinstance(command, SetRateCommand):
             if command.input_id not in {node.id for node in layout.inputs}:
                 raise ValueError(f"Unknown input: {command.input_id}")
+        elif isinstance(command, AcknowledgeAlarmCommand):
+            if command.alarm_id > self.engine.last_alarm_id:
+                raise ValueError(f"Unknown alarm: {command.alarm_id}")
         self.commands.put_nowait(command)
 
     def update(self) -> int:
@@ -117,8 +122,13 @@ class Runner:
         real time spent paused is never simulated afterwards and a new speed
         applies only from now. Reset keeps the speed and leaves the new
         engine paused at tick 0, in a new run whose record starts with the
-        reset itself.
+        reset itself. An acknowledgement checked against the old engine but
+        queued behind a reset names an alarm of the old run: the new engine
+        has raised none yet, so it is dropped unrecorded.
         """
+        if (isinstance(command, AcknowledgeAlarmCommand)
+                and command.alarm_id > self.engine.last_alarm_id):
+            return
         if isinstance(command, ResetCommand):
             self.engine = Engine(self.engine.layout, seed=self.engine.seed)
             self.running = False
@@ -162,3 +172,5 @@ def apply_to_engine(engine: Engine, command: Command) -> None:
         engine.set_missort_probability(command.probability)
     elif isinstance(command, ForceMissortCommand):
         engine.force_missort()
+    elif isinstance(command, AcknowledgeAlarmCommand):
+        engine.acknowledge_alarm(command.alarm_id)

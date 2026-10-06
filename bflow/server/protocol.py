@@ -9,10 +9,11 @@ Every message is a JSON object with a ``type`` field. The server sends:
 
 The browser sends commands: ``start``, ``pause``, ``reset``, ``set_speed``,
 ``set_rate``, ``stop_belt``, ``restart_belt``, ``fault_belt``,
-``repair_belt``, ``set_missort_probability`` and ``force_missort``. parse_command() accepts
-only known commands with exactly their fields and values in range; anything
-else raises pydantic.ValidationError before reaching the runner, which then
-checks that the belt or input exists. The runner records each applied
+``repair_belt``, ``set_missort_probability``, ``force_missort`` and
+``acknowledge_alarm``. parse_command() accepts only known commands with
+exactly their fields and values in range; anything else raises
+pydantic.ValidationError before reaching the runner, which then checks that
+the belt, input or alarm exists. The runner records each applied
 command as a ``CommandRecord`` with the tick it was applied at.
 
 Layout and snapshot carry the tick and simulated time they describe. The two
@@ -25,7 +26,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from bflow.core.engine import STEP_MS, Engine
-from bflow.core.events import Severity
+from bflow.core.events import AlarmState, Severity
 
 
 class Message(BaseModel):
@@ -183,6 +184,27 @@ class EventState(TimedMessage):
     message: str
     element_id: str | None
     baggage_id: str | None
+    # The alarm this event raised, acknowledged or resolved, if any.
+    alarm_id: int | None = Field(ge=1)
+
+
+class AlarmInfo(Message):
+    """A lasting condition of a belt or bag: active, acknowledged or resolved.
+
+    Times are simulated seconds: how long an alarm has been open is the
+    snapshot's time_s minus raised_at_s, frozen while paused.
+    """
+
+    id: int = Field(ge=1)
+    kind: str = Field(min_length=1)
+    severity: Severity
+    state: AlarmState
+    message: str
+    element_id: str | None
+    baggage_id: str | None
+    raised_at_s: float = Field(ge=0)
+    acknowledged_at_s: float | None = Field(ge=0)
+    resolved_at_s: float | None = Field(ge=0)
 
 
 class SnapshotMessage(TimedMessage):
@@ -204,6 +226,9 @@ class SnapshotMessage(TimedMessage):
     missort_forced: bool
     baggage: list[BaggageState]
     stats: StatsState
+    # Open alarms (active or acknowledged) in the order they were raised,
+    # then the latest resolved ones, in the order they were resolved.
+    alarms: list[AlarmInfo]
     events: list[EventState]
 
 
@@ -252,6 +277,8 @@ def snapshot_message(engine: Engine, *, running: bool, speed: int = 1, run: int 
         baggage=[BaggageState.model_validate(baggage, from_attributes=True)
                  for conveyor in engine.conveyors.values() for baggage in conveyor.baggage],
         stats=StatsState.model_validate(engine.stats(), from_attributes=True),
+        alarms=[AlarmInfo.model_validate(alarm, from_attributes=True)
+                for alarm in (*engine.alarms.values(), *engine.resolved_alarms)],
         events=[EventState.model_validate(event, from_attributes=True)
                 for event in engine.events.since(after_event_id)],
     )
@@ -340,13 +367,21 @@ class ForceMissortCommand(Message):
     type: Literal["force_missort"]
 
 
+class AcknowledgeAlarmCommand(Message):
+    """Tells the engine the operator has seen an alarm; it repairs nothing."""
+
+    type: Literal["acknowledge_alarm"]
+    # Strict: an id is a JSON integer, not a string or a float.
+    alarm_id: int = Field(ge=1, strict=True)
+
+
 # Commands that name one belt, which the runner checks against the layout.
 BELT_COMMANDS = (StopBeltCommand, RestartBeltCommand, FaultBeltCommand, RepairBeltCommand)
 
 Command = Annotated[
     StartCommand | PauseCommand | ResetCommand | SetSpeedCommand | SetRateCommand
     | StopBeltCommand | RestartBeltCommand | FaultBeltCommand | RepairBeltCommand
-    | SetMissortProbabilityCommand | ForceMissortCommand,
+    | SetMissortProbabilityCommand | ForceMissortCommand | AcknowledgeAlarmCommand,
     Field(discriminator="type"),
 ]
 _command_adapter: TypeAdapter[Command] = TypeAdapter(Command)

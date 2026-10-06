@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { destinationLooks } from '../src/looks.js';
-import { panelContent } from '../src/panel.js';
+import { alarmText, panelContent } from '../src/panel.js';
 
 const point = (x_m, y_m) => ({ x_m, y_m });
 
@@ -20,6 +20,7 @@ const LAYOUT = {
 
 function snapshot({
   stopped = false, faulty = false, congested = false, bags = 3, missortedTo = null, waiting = false,
+  alarms = [],
 } = {}) {
   return {
     tick: 400,
@@ -37,6 +38,15 @@ function snapshot({
       belts: [{ belt_id: 'line', bags, capacity: 6, occupancy: bags / 6 }],
       inputs: [{ input_id: 'input-a', waiting: 4 }],
     },
+    alarms,
+  };
+}
+
+function alarm(id, kind, state, { element = 'line', bag = null, raised = 12 } = {}) {
+  return {
+    id, kind, severity: kind === 'belt_fault' ? 'error' : 'warning', state, message: '',
+    element_id: element, baggage_id: bag, raised_at_s: raised,
+    acknowledged_at_s: state === 'active' ? null : raised + 1, resolved_at_s: state === 'resolved' ? 19 : null,
   };
 }
 
@@ -51,7 +61,7 @@ test('a belt shows its state, occupancy and connections from the snapshot', () =
   const content = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot());
   assert.equal(content.title, 'Belt line');
   assert.deepEqual(values(content), {
-    State: 'Running', Congestion: 'None', Bags: '3 of 6', Occupancy: '50 %', Length: '5.0 m', Speed: '1.0 m/s',
+    State: 'Running', Congestion: 'None', Alarms: 'None', Bags: '3 of 6', Occupancy: '50 %', Length: '5.0 m', Speed: '1.0 m/s',
     From: 'Check-in A1', To: 'Output BF 101',
   });
   assert.equal(content.occupancy, 0.5);
@@ -80,6 +90,32 @@ test('a faulty belt says so, and a fault wins over the operator\'s stop', () => 
   const both = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ stopped: true, faulty: true }));
   assert.equal(values(both).State, 'Faulty · also stopped by the operator');
   assert.equal(both.state, 'faulty');
+});
+
+test('a belt lists its open alarms with their state and age, highlighted until acknowledged', () => {
+  const alarms = [
+    alarm(1, 'belt_fault', 'acknowledged', { raised: 8 }),
+    alarm(2, 'congestion', 'active', { raised: 15.5 }),
+    alarm(3, 'prolonged_wait', 'active', { bag: 'bag-7' }),   // the bag's, not the belt's
+    alarm(4, 'belt_fault', 'resolved'),
+    alarm(5, 'congestion', 'active', { element: 'other' }),
+  ];
+  const content = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ faulty: true, alarms }));
+  assert.deepEqual(content.rows.find((row) => row.label === 'Alarms'), {
+    label: 'Alarms',
+    value: 'Fault · acknowledged · open for 12.0 s; Congestion · active · open for 4.5 s',
+    alert: true,
+  });
+  // Acknowledged only: still listed, no longer highlighted; the belt is still faulty.
+  const seen = panelContent({ kind: 'belt', id: 'line' }, LAYOUT,
+    snapshot({ faulty: true, alarms: [alarms[0]] }));
+  assert.equal(seen.rows.find((row) => row.label === 'Alarms').alert, false);
+  assert.equal(values(seen).State, 'Faulty · needs repair');
+});
+
+test('an alarm reads as what, its state and how long it has been open', () => {
+  assert.equal(alarmText(alarm(1, 'prolonged_wait', 'active', { raised: 8 }), 20.25),
+    'Prolonged wait · active · open for 12.3 s');
 });
 
 test('before the first snapshot a belt shows its layout only', () => {
@@ -119,6 +155,10 @@ test('a bag in a prolonged wait shows how long it has been still, highlighted', 
   });
   const moving = panelContent({ kind: 'bag', id: 'bag-7' }, LAYOUT, snapshot());
   assert.ok(!moving.rows.some((row) => row.label === 'Prolonged wait'));
+  const seen = panelContent({ kind: 'bag', id: 'bag-7' }, LAYOUT, snapshot({
+    waiting: true, alarms: [alarm(1, 'prolonged_wait', 'acknowledged', { bag: 'bag-7' })],
+  }));
+  assert.equal(seen.rows.at(-1).value, 'Warning · not moved for 6.3 s · acknowledged');
 });
 
 test('a bag that has left the plant says so', () => {

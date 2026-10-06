@@ -5,7 +5,9 @@ earlier: baggage conservation, spacing, routing, the entrance queues,
 waiting at the end of a belt, the alternation at the merge, sorting
 errors (decided once, counted once, and the only cause of a wrong exit),
 the congestion warnings (start after 10 s above 80 %, clear below 60 %) and
-the prolonged waits (a bag not advancing for 30 s warns until it advances).
+the prolonged waits (a bag not advancing for 30 s warns until it advances)
+and the alarms (one open alarm for each fault, congestion and prolonged
+wait, resolved when it ends, whether acknowledged or not).
 """
 
 from collections import Counter
@@ -14,7 +16,7 @@ from dataclasses import replace
 import pytest
 
 from bflow.core.engine import STEP_SECONDS, Engine
-from bflow.core.events import Severity
+from bflow.core.events import AlarmState, Severity
 from bflow.core.layout import default_layout
 from tests.layouts import compact_layout
 
@@ -55,6 +57,10 @@ class PlantChecker:
         # Tick each bag on a belt last advanced, and the bags in a prolonged wait.
         self.advanced_at = {}
         self.long_waits = set()
+        # Open alarms, those acknowledged among them, and the last id raised.
+        self.open_alarms = set(engine.alarms)
+        self.acknowledged = set()
+        self.last_alarm_id = engine.last_alarm_id
         # Every event seen, by kind: the engine's history keeps only the latest.
         self.event_counts = Counter()
         self.remember()
@@ -113,6 +119,7 @@ class PlantChecker:
         self.check_sorting_errors(on_belts, events)
         self.check_congestion(events)
         self.check_prolonged_waits(on_belts, events)
+        self.check_alarms(on_belts, events)
         self.event_counts.update(event.kind for event in events)
         self.last_event_id = engine.events.last_id
         self.remember()
@@ -184,6 +191,43 @@ class PlantChecker:
                 if event.kind == "prolonged_wait_resolved"} == resolved
         assert (kinds["prolonged_wait_started"], kinds["prolonged_wait_resolved"]) == (
             len(started), len(resolved))
+
+    def check_alarms(self, on_belts, events):
+        """Each lasting condition has exactly one open alarm, until it ends.
+
+        Alarms are raised with the next ids, one start event each; an
+        acknowledgement (one event) never returns to active and does not end
+        the condition; the end resolves the alarm with one event.
+        """
+        engine = self.engine
+        conditions = sorted(
+            [("belt_fault", belt_id) for belt_id, conveyor in engine.conveyors.items()
+             if conveyor.faulty]
+            + [("congestion", belt_id) for belt_id, conveyor in engine.conveyors.items()
+               if conveyor.congested]
+            + [("prolonged_wait", bag.id) for bag in on_belts if bag.prolonged_wait])
+        assert sorted((alarm.kind, alarm.baggage_id or alarm.element_id)
+                      for alarm in engine.alarms.values()) == conditions
+        raised = set(range(self.last_alarm_id + 1, engine.last_alarm_id + 1))
+        assert set(engine.alarms) - self.open_alarms == raised - {
+            alarm.id for alarm in engine.resolved_alarms}
+        resolved = (self.open_alarms | raised) - set(engine.alarms)
+        acknowledged = {alarm.id for alarm in engine.alarms.values()
+                        if alarm.state is AlarmState.ACKNOWLEDGED}
+        assert self.acknowledged & set(engine.alarms) <= acknowledged
+        assert all(alarm.state is AlarmState.RESOLVED for alarm in engine.resolved_alarms)
+        starts = [event.alarm_id for event in events if event.kind in {
+            "belt_fault", "congestion_started", "prolonged_wait_started"}]
+        ends = [event.alarm_id for event in events if event.kind in {
+            "belt_repaired", "congestion_cleared", "prolonged_wait_resolved"}]
+        acks = [event.alarm_id for event in events if event.kind == "alarm_acknowledged"]
+        assert sorted(starts) == sorted(raised)
+        assert sorted(ends) == sorted(resolved)
+        assert len(acks) == len(set(acks)) and not set(acks) & self.acknowledged
+        self.acknowledged = (self.acknowledged | set(acks)) & set(engine.alarms)
+        assert self.acknowledged == acknowledged
+        self.open_alarms = set(engine.alarms)
+        self.last_alarm_id = engine.last_alarm_id
 
     def check_spacing(self, conveyor):
         gap = self.engine.layout.min_gap_m
@@ -283,6 +327,10 @@ SCENARIOS = {
         4200: ("repair_belt", "collector")}, 12000),
     "demo: line 2 faulty for 120 s": (default_layout(), {
         3000: ("fault_belt", "line-2"), 5400: ("repair_belt", "line-2")}, 12000),
+    "demo: line 2 faulty, its alarm and a congestion acknowledged": (default_layout(), {
+        3000: ("fault_belt", "line-2"), 3100: ("acknowledge_alarm", 1),
+        4000: ("acknowledge_alarm", 2), 4001: ("acknowledge_alarm", 2),
+        5400: ("repair_belt", "line-2")}, 12000),
     "wrong sorting 10 %": (compact_layout(), {0: ("set_missort_probability", 0.1)}, 12000),
     "demo: wrong sorting 20 % while branch 2 is stopped": (default_layout(), {
         0: ("set_missort_probability", 0.2), 3000: ("stop_belt", "branch-2"),
@@ -399,6 +447,35 @@ def test_after_a_fault_is_repaired_the_queue_clears_while_demand_is_below_capaci
     engine = run(*SCENARIOS["demo: line 2 faulty for 120 s"])
     assert engine.waiting_count == 0
     assert engine.stats().errors == 1
+
+
+def test_acknowledged_alarms_stay_open_until_the_repair_and_the_queue_clears():
+    checker = run_checked(*SCENARIOS["demo: line 2 faulty, its alarm and a congestion acknowledged"])
+    engine = checker.engine
+    # Alarm 1 (the fault) and alarm 2 acknowledged; the repeat of alarm 2 adds nothing.
+    assert checker.event_counts["alarm_acknowledged"] == 2
+    assert engine.waiting_count == 0
+    assert engine.stats().errors == 1
+    # Once the backlog has gone, every alarm is resolved.
+    for _ in range(6000):
+        engine.step()
+    assert engine.alarms == {}
+
+
+def test_an_acknowledged_fault_still_halts_the_line_until_the_repair():
+    engine = Engine(default_layout())
+    for tick in range(5400):
+        if tick == 3000:
+            engine.fault_belt("line-2")
+        if tick == 3100:
+            engine.acknowledge_alarm(1)
+        engine.step()
+    fault = engine.alarms[1]
+    assert (fault.kind, fault.state) == ("belt_fault", AlarmState.ACKNOWLEDGED)
+    assert engine.conveyors["line-2"].faulty
+    assert all(node.waiting > 0 for node in engine.stats().inputs)
+    # The scenario above acknowledges alarm 2 at tick 4000: it exists by then.
+    assert engine.last_alarm_id > 2
 
 
 def test_two_forced_errors_give_two_errors_and_two_wrong_exits():
@@ -570,8 +647,65 @@ def test_the_checker_notices_a_broken_prolonged_wait(sabotage):
             checker.check()
 
 
+def acknowledgement_repairs(engine):
+    """Acknowledging an alarm also clears the fault."""
+    acknowledge = engine.acknowledge_alarm
+
+    def and_repair(alarm_id):
+        acknowledge(alarm_id)
+        for conveyor in engine.conveyors.values():
+            conveyor.faulty = False
+    engine.acknowledge_alarm = and_repair
+
+
+def alarms_never_resolve(engine):
+    """The end of a condition records its event but leaves the alarm open."""
+    def resolve(kind, event_kind, message, *, element_id, baggage_id=None):
+        engine.events.record(engine.tick, engine.time_s, Severity.INFO, event_kind, message,
+                             element_id=element_id, baggage_id=baggage_id)
+    engine._resolve_alarm = resolve
+
+
+def acknowledgement_reopens(engine):
+    """An acknowledged alarm goes back to active at the next tick."""
+    step = engine.step
+
+    def forget():
+        for alarm in engine.alarms.values():
+            alarm.acknowledged_at_s = None
+        step()
+    engine.step = forget
+
+
+@pytest.mark.parametrize("sabotage", [acknowledgement_repairs, alarms_never_resolve,
+                                      acknowledgement_reopens])
+def test_the_checker_notices_broken_alarms(sabotage):
+    engine = Engine(with_rates(1))
+    checker = PlantChecker(engine)
+    sabotage(engine)
+    with pytest.raises(AssertionError):
+        for tick in range(3000):
+            if tick == 100:
+                engine.fault_belt("collector")
+            if tick == 200:
+                engine.acknowledge_alarm(1)
+            if tick == 1300:
+                engine.repair_belt("collector")
+            checker.halted = halted_belts(engine)
+            engine.step()
+            checker.check()
+
+
 def test_without_sabotage_the_same_stop_passes_the_checker():
     checker = run_checked(with_rates(1), {100: ("stop_belt", "collector"),
                                           1300: ("restart_belt", "collector")}, 3000)
     assert checker.event_counts["prolonged_wait_started"] > 0
     assert checker.event_counts["prolonged_wait_resolved"] > 0
+
+
+def test_without_sabotage_the_same_fault_and_acknowledgement_pass_the_checker():
+    checker = run_checked(with_rates(1), {100: ("fault_belt", "collector"),
+                                          200: ("acknowledge_alarm", 1),
+                                          1300: ("repair_belt", "collector")}, 3000)
+    assert checker.event_counts["alarm_acknowledged"] == 1
+    assert checker.event_counts["belt_repaired"] == 1

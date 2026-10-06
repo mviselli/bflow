@@ -5,8 +5,9 @@
 // layout and the newest snapshot it builds a title, a list of rows and the
 // action available. Every value is the engine's, as the snapshot reports it;
 // the page only formats it. The only subtractions are a bag's travel time so
-// far (the snapshot's time minus its admission time) and, during a prolonged
-// wait, how long it has been still (the snapshot's time minus its last move). Like the
+// far (the snapshot's time minus its admission time), during a prolonged
+// wait how long it has been still (the snapshot's time minus its last move),
+// and how long an alarm has been open (minus its raise time). Like the
 // counters, the panel shows the newest snapshot, a fraction of a second ahead
 // of the picture.
 
@@ -33,6 +34,22 @@ function elementName(id, layout) {
   return id;
 }
 
+// The engine's alarm kinds, as the operator reads them.
+const ALARM_NAMES = { belt_fault: 'Fault', congestion: 'Congestion', prolonged_wait: 'Prolonged wait' };
+
+// An open alarm in words: what, its state, and how long it has been open in
+// simulated time (so it stands still while paused).
+export function alarmText(alarm, timeS) {
+  const name = ALARM_NAMES[alarm.kind] ?? alarm.kind;
+  return `${name} · ${alarm.state} · open for ${(timeS - alarm.raised_at_s).toFixed(1)} s`;
+}
+
+// The open alarms (active or acknowledged) of a belt itself, or of a bag.
+function openAlarms(snapshot, { beltId = null, bagId = null }) {
+  return (snapshot?.alarms ?? []).filter((alarm) => alarm.state !== 'resolved'
+    && (bagId ? alarm.baggage_id === bagId : alarm.baggage_id === null && alarm.element_id === beltId));
+}
+
 // A belt's condition in words. A fault and the operator's stop are
 // independent: the belt moves only when neither is set.
 export function beltStateText(state) {
@@ -46,12 +63,19 @@ function beltContent(id, layout, snapshot) {
   if (!belt) return null;
   const state = snapshot?.belts.find((item) => item.id === id);
   const stats = snapshot?.stats.belts.find((item) => item.belt_id === id);
+  const alarms = openAlarms(snapshot, { beltId: id });
   const rows = [
     { label: 'State', value: beltStateText(state) },
     {
       label: 'Congestion',
       value: !state ? '—' : state.congested ? 'Warning · was above 80 % for 10 s' : 'None',
       alert: Boolean(state?.congested),
+    },
+    {
+      label: 'Alarms',
+      value: !snapshot ? '—' : alarms.map((alarm) => alarmText(alarm, snapshot.time_s)).join('; ') || 'None',
+      // Highlighted while one has not been acknowledged.
+      alert: alarms.some((alarm) => alarm.state === 'active'),
     },
     { label: 'Bags', value: stats ? `${stats.bags} of ${stats.capacity}` : '—' },
     { label: 'Occupancy', value: stats ? `${Math.round(stats.occupancy * 100)} %` : '—' },
@@ -99,11 +123,14 @@ function bagContent(id, layout, snapshot, destinations) {
   const wrong = baggage.missorted_to_id
     ? [{ label: 'Sorting error', value: `sent to ${elementName(baggage.missorted_to_id, layout)}` }]
     : [];
-  // The engine's warning for a bag that has not advanced for 30 s.
+  // The engine's warning for a bag that has not advanced for 30 s, and
+  // whether the operator has acknowledged its alarm.
+  const acknowledged = openAlarms(snapshot, { bagId: id }).some((alarm) => alarm.state === 'acknowledged');
   const still = baggage.prolonged_wait
     ? [{
       label: 'Prolonged wait',
-      value: `Warning · not moved for ${(snapshot.time_s - baggage.moved_at_s).toFixed(1)} s`,
+      value: `Warning · not moved for ${(snapshot.time_s - baggage.moved_at_s).toFixed(1)} s`
+        + (acknowledged ? ' · acknowledged' : ''),
       alert: true,
     }]
     : [];
