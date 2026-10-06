@@ -44,6 +44,12 @@ class Stats:
 
     ``throughput`` counts the correct deliveries in the last 60 simulated
     seconds (fewer seconds at the start of a run).
+
+    ``errors`` and ``warnings`` are occurrences since the start of the run:
+    errors are faults plus wrong sortings, warnings are congestions plus
+    prolonged waits. ``active_errors`` and ``active_warnings`` are the
+    alarms open now (active or acknowledged), which go back down when their
+    conditions end.
     """
 
     tick: int
@@ -57,6 +63,12 @@ class Stats:
     mean_travel_time_s: float | None
     errors: int
     warnings: int
+    faults: int
+    wrong_sortings: int
+    congestions: int
+    prolonged_waits: int
+    active_errors: int
+    active_warnings: int
     throughput: int
     belts: tuple[BeltStats, ...]
     inputs: tuple[InputStats, ...]

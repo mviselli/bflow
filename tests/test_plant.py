@@ -264,6 +264,13 @@ class PlantChecker:
             + [("prolonged_wait", bag.id) for bag in on_belts if bag.prolonged_wait])
         assert sorted((alarm.kind, alarm.baggage_id or alarm.element_id)
                       for alarm in engine.alarms.values()) == conditions
+        # The statistics: occurrences by kind add up, and active alarms are
+        # the conditions open now.
+        stats = engine.stats()
+        assert stats.errors == stats.faults + stats.wrong_sortings
+        assert stats.warnings == stats.congestions + stats.prolonged_waits
+        assert stats.active_errors == sum(kind == "belt_fault" for kind, _ in conditions)
+        assert stats.active_warnings == len(conditions) - stats.active_errors
         raised = set(range(self.last_alarm_id + 1, engine.last_alarm_id + 1))
         assert set(engine.alarms) - self.open_alarms == raised - {
             alarm.id for alarm in engine.resolved_alarms}

@@ -28,7 +28,8 @@ test('simulated time is shown as minutes and seconds with hundredths', () => {
 function stats(overrides = {}) {
   return {
     generated: 40, waiting: 3, admitted: 37, in_transit: 12, correctly_delivered: 24,
-    misdelivered: 1, mean_travel_time_s: 21.6, throughput: 18, errors: 1, warnings: 2,
+    misdelivered: 1, mean_travel_time_s: 21.6, throughput: 18, errors: 3, warnings: 7,
+    faults: 1, wrong_sortings: 2, congestions: 2, prolonged_waits: 5, active_errors: 1, active_warnings: 4,
     ...overrides,
   };
 }
@@ -39,8 +40,16 @@ test('every engine indicator is shown in its group, copied from the stats withou
     ['flow', 'In transit', '12'],
     ['deliveries', 'Delivered', '24'], ['deliveries', 'Wrong exits', '1'],
     ['deliveries', 'Throughput', '18'], ['deliveries', 'Mean travel time', '21.6 s'],
-    ['alarms', 'Errors', '1'], ['alarms', 'Warnings', '2'],
+    ['alarms', 'Active errors', '1'], ['alarms', 'Active warnings', '4'],
+    ['alarms', 'Errors', '3'], ['alarms', 'Warnings', '7'],
   ]);
+});
+
+test('errors and warnings since the start show the engine\'s breakdown as their caption', () => {
+  const captions = Object.fromEntries(indicators(stats()).map((item) => [item.key, item.caption]));
+  assert.equal(captions.errors, '1 fault · 2 wrong sortings');
+  assert.equal(captions.warnings, '2 congestions · 5 prolonged waits');
+  assert.equal(captions.active_errors, 'open now');
 });
 
 test('without exited bags the mean time is a dash, and every indicator has a caption and help', () => {
@@ -49,9 +58,10 @@ test('without exited bags the mean time is a dash, and every indicator has a cap
   assert.ok(shown.every((item) => item.caption.length > 0 && item.help.length > 0));
 });
 
-test('wrong exits, warnings and errors call for attention only above zero', () => {
+test('wrong exits and active alarms call for attention only above zero, past occurrences never', () => {
   const alerts = (values) => Object.fromEntries(indicators(stats(values))
     .filter((item) => item.alert).map((item) => [item.key, item.alert]));
-  assert.deepEqual(alerts({}), { misdelivered: 'warning', errors: 'error', warnings: 'warning' });
-  assert.deepEqual(alerts({ misdelivered: 0, errors: 0, warnings: 0, waiting: 9 }), {});
+  assert.deepEqual(alerts({}), { misdelivered: 'warning', active_errors: 'error', active_warnings: 'warning' });
+  // Everything repaired and cleared: the occurrences stay, highlighted no more.
+  assert.deepEqual(alerts({ misdelivered: 0, active_errors: 0, active_warnings: 0, waiting: 9 }), {});
 });

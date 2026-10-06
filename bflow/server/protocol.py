@@ -168,8 +168,16 @@ class StatsState(Message):
     misdelivered: int = Field(ge=0)
     in_transit: int = Field(ge=0)
     mean_travel_time_s: float | None = Field(ge=0)
+    # Occurrences since the start of the run, and what they were.
     errors: int = Field(ge=0)
     warnings: int = Field(ge=0)
+    faults: int = Field(ge=0)
+    wrong_sortings: int = Field(ge=0)
+    congestions: int = Field(ge=0)
+    prolonged_waits: int = Field(ge=0)
+    # Alarms open now, active or acknowledged.
+    active_errors: int = Field(ge=0)
+    active_warnings: int = Field(ge=0)
     # Correct deliveries in the last 60 simulated seconds.
     throughput: int = Field(ge=0)
     # One entry per belt and per input, in layout order.

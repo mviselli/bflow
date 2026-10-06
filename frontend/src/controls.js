@@ -5,8 +5,12 @@
 // page never computes its own version of the statistics, it only formats
 // them.
 
+// "1 fault", "2 faults".
+const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
 // Indicators in three groups. Each one: key in the snapshot's stats, name,
-// a short caption shown under the value, and what it means (tooltip).
+// a short caption shown under the value (text, or a function of the stats
+// that formats the engine's own breakdown), and what it means (tooltip).
 // The counter rules read along the first two groups:
 // Generated = Admitted + Waiting; Admitted = Delivered + Wrong exits + In transit.
 export const INDICATOR_GROUPS = [
@@ -36,14 +40,22 @@ export const INDICATOR_GROUPS = [
     id: 'alarms',
     title: 'Alarms',
     items: [
-      ['errors', 'Errors', 'since the start', 'Error occurrences since the start of the run'],
-      ['warnings', 'Warnings', 'since the start', 'Warning occurrences since the start of the run'],
+      ['active_errors', 'Active errors', 'open now',
+        'Error alarms open now (faults not yet repaired), acknowledged or not'],
+      ['active_warnings', 'Active warnings', 'open now',
+        'Warning alarms open now (congestions, prolonged waits), acknowledged or not'],
+      ['errors', 'Errors', (stats) => `${count(stats.faults, 'fault')} · ${count(stats.wrong_sortings, 'wrong sorting')}`,
+        'Error occurrences since the start of the run: faults and wrong sortings'],
+      ['warnings', 'Warnings',
+        (stats) => `${count(stats.congestions, 'congestion')} · ${count(stats.prolonged_waits, 'prolonged wait')}`,
+        'Warning occurrences since the start of the run: congestions and prolonged waits'],
     ],
   },
 ];
 
-// Indicators that call for attention when above zero.
-const ALERTS = { misdelivered: 'warning', warnings: 'warning', errors: 'error' };
+// Indicators that call for attention when above zero. The occurrences since
+// the start are not: they never go back down, the active alarms do.
+const ALERTS = { misdelivered: 'warning', active_warnings: 'warning', active_errors: 'error' };
 
 // The indicators of a snapshot's stats, in display order, as
 // { group, key, name, caption, help, value, alert } with value as text and
@@ -53,7 +65,7 @@ export function indicators(stats) {
     group: group.id,
     key,
     name,
-    caption,
+    caption: typeof caption === 'function' ? caption(stats) : caption,
     help,
     value: formatIndicator(key, stats[key]),
     alert: ALERTS[key] && stats[key] > 0 ? ALERTS[key] : null,
@@ -94,6 +106,7 @@ export function createControls({ onCommand }) {
 
   // One tile per indicator: name, value and caption, grouped.
   const values = {};
+  const notes = {};
   const tiles = {};
   for (const group of INDICATOR_GROUPS) {
     const section = document.createElement('section');
@@ -112,10 +125,11 @@ export function createControls({ onCommand }) {
       value.className = 'value';
       value.textContent = '—';
       note.className = 'caption';
-      note.textContent = caption;
+      note.textContent = typeof caption === 'function' ? 'since the start' : caption;
       tile.append(term, value, note);
       list.append(tile);
       values[key] = value;
+      notes[key] = note;
       tiles[key] = tile;
     }
     section.append(heading, list);
@@ -157,8 +171,9 @@ export function createControls({ onCommand }) {
       for (const speed of speeds) {
         speed.setAttribute('aria-pressed', String(Number(speed.dataset.speed) === snapshot.speed));
       }
-      for (const { key, value, alert } of indicators(snapshot.stats)) {
+      for (const { key, value, caption, alert } of indicators(snapshot.stats)) {
         values[key].textContent = value;
+        notes[key].textContent = caption;
         if (alert) tiles[key].dataset.alert = alert;
         else delete tiles[key].dataset.alert;
       }

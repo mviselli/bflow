@@ -90,7 +90,7 @@ button.warning:disabled { background: #304354; }
 .indicators-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 12px; }
 .indicators-head h3 { margin: 0; font-size: 16px; }
 .indicators-head p { margin: 0; font-size: 14px; color: #f0a36b; }
-#counters { display: grid; grid-template-columns: 2fr 2fr 1fr; gap: 16px; }
+#counters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 @media (max-width: 900px) { #counters { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { #counters { grid-template-columns: 1fr; } }
 .indicator-group { margin: 0; padding: 14px 16px 16px; border: 1px solid #304354; border-radius: 8px; background: #122130; }
@@ -99,7 +99,6 @@ button.warning:disabled { background: #304354; }
   text-transform: uppercase; color: #75d7c0;
 }
 .indicator-group dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
-.indicator-group[data-group="alarms"] dl { grid-template-columns: minmax(0, 1fr); }
 .indicator-group dl div {
   padding: 10px 12px; border-radius: 6px; background: #0e1923; border-left: 3px solid #304354; cursor: help;
 }

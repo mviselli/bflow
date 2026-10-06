@@ -11,7 +11,7 @@ it, and resolved when the condition ends. The engine owns the alarms; each
 change of state is also an event.
 """
 
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -91,6 +91,8 @@ class EventLog:
             raise ValueError("max_recent must be a positive integer")
         self.recent: deque[Event] = deque(maxlen=max_recent)
         self.counts = {severity: 0 for severity in Severity}
+        # Cumulative count of each kind, e.g. how many faults there were.
+        self.kind_counts: Counter[str] = Counter()
         self._last_id = 0
 
     @property
@@ -120,6 +122,7 @@ class EventLog:
                       element_id, baggage_id, alarm_id)
         self.recent.append(event)
         self.counts[event.severity] += 1
+        self.kind_counts[kind] += 1
         return event
 
     def since(self, event_id: int) -> tuple[Event, ...]:

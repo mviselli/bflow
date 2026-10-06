@@ -65,6 +65,9 @@ def format_summary(stats: Stats, seed: int, layout_name: str = "full",
                    missort_probability: float = 0.0) -> str:
     """The totals, then one line per input, output and belt, as the engine counted them.
 
+    Errors and warnings are occurrences since the start, by kind; the active
+    alarms are the conditions still open at the end of the run.
+
     The wrong sorting probability is shown in the header only when it is set.
     """
     mean = "—" if stats.mean_travel_time_s is None else f"{stats.mean_travel_time_s:.2f} s"
@@ -78,8 +81,11 @@ def format_summary(stats: Stats, seed: int, layout_name: str = "full",
         ("In transit", stats.in_transit),
         ("Mean travel time", mean),
         ("Throughput (60 s)", stats.throughput),
-        ("Errors", stats.errors),
-        ("Warnings", stats.warnings),
+        ("Errors", f"{stats.errors} (faults {stats.faults}, "
+                   f"wrong sorting {stats.wrong_sortings})"),
+        ("Warnings", f"{stats.warnings} (congestion {stats.congestions}, "
+                     f"prolonged wait {stats.prolonged_waits})"),
+        ("Active alarms", f"errors {stats.active_errors}, warnings {stats.active_warnings}"),
     ]
     width = max(len(label) for label, _ in rows)
     id_width = max(len(item_id) for item_id in

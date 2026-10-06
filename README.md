@@ -54,7 +54,10 @@ selection.
 The indicators under the map come from the engine, in three groups: bag flow
 (generated, waiting at the desks, admitted, in transit), deliveries
 (delivered, wrong exits, throughput over the last 60 simulated seconds, mean
-travel time) and alarms (errors, warnings); hover over one for its meaning.
+travel time) and alarms (active errors and warnings — the alarms open now,
+highlighted while there are any — then errors and warnings since the start,
+with what they were); hover over one for its meaning. The command-line run
+prints the same breakdown and the alarms still open at the end.
 
 If the server stops or the network drops, the page says so over the map,
 disables the commands and keeps the last state received, dimmed; it reconnects

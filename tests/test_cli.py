@@ -50,6 +50,27 @@ def test_a_wrong_sorting_probability_causes_errors_and_wrong_exits(capsys):
     assert stats.errors > 0 and stats.misdelivered > 0
     assert out.strip() == cli.format_summary(stats, 42, "full", 0.1)
     assert "Layout full · seed 42 · wrong sorting 0.1 · 300.00 simulated s" in out
+    assert f"Errors:              {stats.errors} (faults 0, wrong sorting {stats.errors})" in out
+
+
+def test_the_summary_separates_occurrences_from_the_alarms_still_open():
+    # line-2 faulty for 60 s, then branch-1 faulty until the end of the run.
+    engine = Engine(default_layout())
+    for tick in range(4000):
+        if tick == 1000:
+            engine.fault_belt("line-2")
+        if tick == 2200:
+            engine.repair_belt("line-2")
+        if tick == 3000:
+            engine.fault_belt("branch-1")
+        engine.step()
+    stats = engine.stats()
+    lines = cli.format_summary(stats, 42).splitlines()
+    assert "Errors:              2 (faults 2, wrong sorting 0)" in lines
+    assert (f"Warnings:            {stats.warnings} (congestion {stats.congestions}, "
+            f"prolonged wait {stats.prolonged_waits})") in lines
+    assert stats.warnings > 0 and stats.active_warnings > 0
+    assert f"Active alarms:       errors 1, warnings {stats.active_warnings}" in lines
 
 
 @pytest.mark.parametrize("probability", ["-0.1", "1.5", "lots"])

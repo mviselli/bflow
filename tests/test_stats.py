@@ -6,6 +6,7 @@ import pytest
 
 from bflow.core.engine import Engine
 from bflow.core.layout import minimal_layout
+from bflow.core.models import Baggage
 
 
 def test_initial_snapshot_is_empty_and_conserved():
@@ -84,3 +85,30 @@ def test_conservation_check_detects_per_input_belt_or_output_counts_that_do_not_
     )).is_conserved
     assert not dataclasses.replace(stats, outputs=(
         dataclasses.replace(output, misdelivered=1),)).is_conserved
+
+
+def test_occurrences_since_the_start_stay_while_active_alarms_go_back_down():
+    engine = Engine(minimal_layout(arrival_rate_bags_s=0))
+    engine.stop_belt("belt-1")
+    for n in range(10):
+        engine.conveyors["belt-1"].baggage.insert(0, Baggage(
+            f"bag-{n}", "output-1", 0.6, 0, "belt-1", n * 0.9, entered_at_s=0))
+    engine.fault_belt("belt-1")
+    engine.set_missort_probability(0)
+    for _ in range(600):
+        engine.step()
+    stats = engine.stats()
+    # One fault, one congestion (10 of 12 bags) and ten bags still for 30 s.
+    assert (stats.errors, stats.faults, stats.wrong_sortings) == (1, 1, 0)
+    assert (stats.warnings, stats.congestions, stats.prolonged_waits) == (11, 1, 10)
+    assert (stats.active_errors, stats.active_warnings) == (1, 11)
+    # Acknowledging changes neither count.
+    engine.acknowledge_alarm(1)
+    assert engine.stats().active_errors == 1
+    engine.repair_belt("belt-1")
+    engine.restart_belt("belt-1")
+    for _ in range(400):
+        engine.step()
+    stats = engine.stats()
+    assert (stats.errors, stats.warnings) == (1, 11)
+    assert (stats.active_errors, stats.active_warnings) == (0, 0)

@@ -178,6 +178,13 @@ class Engine:
             mean_travel_time_s=self.mean_travel_time_s,
             errors=self.events.counts[Severity.ERROR],
             warnings=self.events.counts[Severity.WARNING],
+            faults=self.events.kind_counts["belt_fault"],
+            wrong_sortings=self.events.kind_counts["wrong_sorting"],
+            congestions=self.events.kind_counts["congestion_started"],
+            prolonged_waits=self.events.kind_counts["prolonged_wait_started"],
+            active_errors=sum(alarm.severity is Severity.ERROR for alarm in self.alarms.values()),
+            active_warnings=sum(alarm.severity is Severity.WARNING
+                                for alarm in self.alarms.values()),
             throughput=self.throughput,
             belts=tuple(BeltStats(belt_id, len(conveyor.baggage), self.belt_capacities[belt_id])
                         for belt_id, conveyor in self.conveyors.items()),
