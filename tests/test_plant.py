@@ -6,8 +6,10 @@ waiting at the end of a belt, the alternation at the merge, sorting
 errors (decided once, counted once, and the only cause of a wrong exit),
 the congestion warnings (start after 10 s above 80 %, clear below 60 %) and
 the prolonged waits (a bag not advancing for 30 s warns until it advances)
-and the alarms (one open alarm for each fault, congestion and prolonged
-wait, resolved when it ends, whether acknowledged or not).
+the alarms (one open alarm for each fault, congestion and prolonged wait,
+resolved when it ends, whether acknowledged or not) and the events
+themselves (consecutive ids, recorded at the tick of the change, a
+condition's start and end alternating, never repeated).
 """
 
 from collections import Counter
@@ -15,13 +17,35 @@ from dataclasses import replace
 
 import pytest
 
-from bflow.core.engine import STEP_SECONDS, Engine
+from bflow.core.engine import STEP_MS, STEP_SECONDS, Engine
 from bflow.core.events import AlarmState, Severity
 from bflow.core.layout import default_layout
 from tests.layouts import compact_layout
 
 # Rounding margin for positions, as in the other spacing tests.
 EPSILON = 1e-9
+
+# Events that start or end a condition: kind → (condition, starts it?). The
+# subject of a condition is its bag, or else its element.
+CONDITION_EVENTS = {
+    "entrance_queue_started": ("entrance queue", True),
+    "entrance_queue_cleared": ("entrance queue", False),
+    "belt_stopped": ("stop", True),
+    "belt_restarted": ("stop", False),
+    "belt_fault": ("fault", True),
+    "belt_repaired": ("fault", False),
+    "congestion_started": ("congestion", True),
+    "congestion_cleared": ("congestion", False),
+    "prolonged_wait_started": ("prolonged wait", True),
+    "prolonged_wait_resolved": ("prolonged wait", False),
+}
+# Events that happen at most once for each bag.
+ONCE_PER_BAG = {"wrong_sorting", "wrong_exit"}
+# Events of operator commands, applied between steps: they carry the tick
+# before the step that follows.
+COMMAND_EVENTS = {"belt_stopped", "belt_restarted", "belt_fault", "belt_repaired",
+                  "input_rate_changed", "missort_probability_changed", "missort_forced",
+                  "alarm_acknowledged"}
 
 
 def number(bag):
@@ -61,6 +85,9 @@ class PlantChecker:
         self.open_alarms = set(engine.alarms)
         self.acknowledged = set()
         self.last_alarm_id = engine.last_alarm_id
+        # Conditions on now, as (condition, subject), and the once-per-bag events seen.
+        self.conditions = set()
+        self.once_seen = set()
         # Every event seen, by kind: the engine's history keeps only the latest.
         self.event_counts = Counter()
         self.remember()
@@ -116,6 +143,7 @@ class PlantChecker:
         self.check_waiting_at_belt_ends(entered)
         self.check_merges(entered)
         events = [event for event in engine.events.recent if event.id > self.last_event_id]
+        self.check_events(events)
         self.check_sorting_errors(on_belts, events)
         self.check_congestion(events)
         self.check_prolonged_waits(on_belts, events)
@@ -123,6 +151,34 @@ class PlantChecker:
         self.event_counts.update(event.kind for event in events)
         self.last_event_id = engine.events.last_id
         self.remember()
+
+    def check_events(self, events):
+        """Events since the last tick: the next ids, at this tick, changes only.
+
+        None was dropped from the history before being seen. Only a command
+        event may carry the previous tick (commands are applied between
+        steps). A condition starts only when it is off and ends only when it
+        is on, so it is never recorded again while it lasts; an error and a
+        wrong exit happen once per bag.
+        """
+        engine = self.engine
+        assert [event.id for event in events] == list(
+            range(self.last_event_id + 1, engine.events.last_id + 1))
+        for event in events:
+            assert event.time_s == event.tick * STEP_MS / 1000
+            assert event.tick == engine.tick or (
+                event.tick == engine.tick - 1 and event.kind in COMMAND_EVENTS), event
+            if event.kind in CONDITION_EVENTS:
+                condition, starts = CONDITION_EVENTS[event.kind]
+                key = (condition, event.baggage_id or event.element_id)
+                assert (key in self.conditions) != starts, event
+                if starts:
+                    self.conditions.add(key)
+                else:
+                    self.conditions.remove(key)
+            elif event.kind in ONCE_PER_BAG:
+                assert (event.kind, event.baggage_id) not in self.once_seen, event
+                self.once_seen.add((event.kind, event.baggage_id))
 
     def check_sorting_errors(self, on_belts, events):
         """A missort is decided once, never changes, and records exactly one error event."""
@@ -691,6 +747,57 @@ def test_the_checker_notices_broken_alarms(sabotage):
                 engine.acknowledge_alarm(1)
             if tick == 1300:
                 engine.repair_belt("collector")
+            checker.halted = halted_belts(engine)
+            engine.step()
+            checker.check()
+
+
+def noisy_entrance_queues(engine):
+    """A queue records its start again at every tick while it lasts."""
+    def update():
+        for input_id, queue in engine.waiting.items():
+            if queue:
+                engine.events.record(engine.tick, engine.time_s, Severity.INFO,
+                                     "entrance_queue_started", "Entrance queue",
+                                     element_id=input_id)
+    engine._update_entrance_queues = update
+
+
+def repeated_stop_events(engine):
+    """Stopping a stopped belt records another stop."""
+    set_stopped = engine._set_stopped
+
+    def always(belt_id, stopped):
+        if engine.conveyors[belt_id].stopped == stopped:
+            engine.events.record(engine.tick, engine.time_s, Severity.INFO,
+                                 "belt_stopped" if stopped else "belt_restarted", "Again",
+                                 element_id=belt_id)
+        set_stopped(belt_id, stopped)
+    engine._set_stopped = always
+
+
+def late_events(engine):
+    """Congestion warnings recorded with the tick before the change."""
+    update = engine._update_congestion
+
+    def earlier():
+        engine._tick -= 1
+        update()
+        engine._tick += 1
+    engine._update_congestion = earlier
+
+
+@pytest.mark.parametrize("sabotage", [noisy_entrance_queues, repeated_stop_events, late_events])
+def test_the_checker_notices_repeated_or_misplaced_events(sabotage):
+    engine = Engine(with_rates(1))
+    checker = PlantChecker(engine)
+    sabotage(engine)
+    with pytest.raises(AssertionError):
+        for tick in range(3000):
+            if tick in (100, 101):
+                engine.stop_belt("collector")
+            if tick in (1300, 1301):
+                engine.restart_belt("collector")
             checker.halted = halted_belts(engine)
             engine.step()
             checker.check()

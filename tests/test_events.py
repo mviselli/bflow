@@ -6,6 +6,7 @@ from bflow.core.engine import Engine
 from bflow.core.events import EventLog, Severity
 from bflow.core.layout import minimal_layout
 from bflow.core.models import Baggage
+from tests.layouts import compact_layout
 
 
 def test_ids_are_progressive_and_counts_survive_the_bounded_history():
@@ -89,3 +90,35 @@ def test_events_are_independent_between_runs(monkeypatch):
         first.step()
     assert first.events.total_count == 1
     assert second.events.total_count == 0
+
+
+# Each operator command, after what it needs first, and the event it records.
+COMMANDS = {
+    "stop_belt": ((), ("stop_belt", "collector"), "belt_stopped"),
+    "restart_belt": ((("stop_belt", "collector"),), ("restart_belt", "collector"),
+                     "belt_restarted"),
+    "fault_belt": ((), ("fault_belt", "collector"), "belt_fault"),
+    "repair_belt": ((("fault_belt", "collector"),), ("repair_belt", "collector"),
+                    "belt_repaired"),
+    "set_arrival_rate": ((), ("set_arrival_rate", "input-a", 0.4), "input_rate_changed"),
+    "set_missort_probability": ((), ("set_missort_probability", 0.2),
+                                "missort_probability_changed"),
+    "force_missort": ((), ("force_missort",), "missort_forced"),
+    "acknowledge_alarm": ((("fault_belt", "collector"),), ("acknowledge_alarm", 1),
+                          "alarm_acknowledged"),
+}
+
+
+@pytest.mark.parametrize("name", COMMANDS)
+def test_a_repeated_command_records_its_event_once(name):
+    # Sent again at the same tick and at later ticks, it changes nothing more.
+    engine = Engine(compact_layout())
+    before, (method, *args), kind = COMMANDS[name]
+    for setup, *setup_args in before:
+        getattr(engine, setup)(*setup_args)
+    for _ in range(3):
+        getattr(engine, method)(*args)
+    engine.step()
+    getattr(engine, method)(*args)
+    engine.step()
+    assert [event.tick for event in engine.events.recent if event.kind == kind] == [0]
