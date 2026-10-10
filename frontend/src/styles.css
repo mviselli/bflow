@@ -111,6 +111,44 @@ button.warning:disabled { background: #304354; }
 .indicator-group div[data-alert="error"] { border-left-color: #ff7a7a; }
 .indicator-group div[data-alert="error"] .value { color: #ff7a7a; }
 
+/* Event log under the indicators: newest first, filtered by severity. */
+.events { margin-top: 24px; }
+.events-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.events-head h3 { margin: 0; font-size: 16px; }
+.events-head p { margin: 0 auto 0 0; font-size: 14px; }
+.severity-filter { display: flex; flex-wrap: wrap; gap: 6px; }
+.severity-filter button {
+  min-width: 0; padding: 4px 10px; font-size: 13px; font-variant-numeric: tabular-nums;
+  color: #7d91a2; background: transparent; border: 1px solid #304354;
+}
+.severity-filter button[aria-pressed="true"] { color: #e8eef3; background: #122130; }
+.severity-filter button[aria-pressed="true"][data-severity="error"] { border-color: #ff7a7a; }
+.severity-filter button[aria-pressed="true"][data-severity="warning"] { border-color: #f0a36b; }
+.severity-filter button[aria-pressed="true"][data-severity="info"] { border-color: #75d7c0; }
+#event-list {
+  max-height: 320px; margin: 0; padding: 0; overflow-y: auto; list-style: none;
+  border: 1px solid #304354; border-radius: 8px; background: #122130; font-size: 14px;
+}
+#event-list li {
+  display: grid; grid-template-columns: 9ch 10ch minmax(0, 14rem) minmax(0, 1fr); gap: 4px 12px;
+  padding: 6px 12px; border-bottom: 1px solid #1d3042; border-left: 3px solid transparent;
+}
+#event-list li:last-child { border-bottom: 0; }
+#event-list li.empty { display: block; color: #7d91a2; }
+#event-list time { font-variant-numeric: tabular-nums; color: #aebfce; }
+#event-list .subject { color: #e8eef3; overflow-wrap: anywhere; }
+#event-list .message { color: #aebfce; }
+#event-list .severity { font-weight: 600; color: #75d7c0; }
+#event-list li[data-severity="warning"] { border-left-color: #f0a36b; }
+#event-list li[data-severity="warning"] .severity { color: #f0a36b; }
+#event-list li[data-severity="error"] { border-left-color: #ff7a7a; }
+#event-list li[data-severity="error"] .severity { color: #ff7a7a; }
+@media (max-width: 700px) {
+  #event-list li { grid-template-columns: 9ch 1fr; }
+  #event-list .subject, #event-list .message { grid-column: 1 / -1; }
+}
+
 /* Connection lost: the last state received stays visible, dimmed. */
 body[data-connection="disconnected"] #counters,
+body[data-connection="disconnected"] #event-list,
 body[data-connection="disconnected"] #panel-body { opacity: 0.45; }

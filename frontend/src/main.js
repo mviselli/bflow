@@ -1,6 +1,7 @@
 import { Application } from 'pixi.js';
 import { connect } from './connection.js';
 import { createControls } from './controls.js';
+import { createEventLog } from './eventlog.js';
 import { destinationLooks } from './looks.js';
 import { createPanel, panelContent } from './panel.js';
 import { createRenderer } from './renderer.js';
@@ -47,6 +48,7 @@ async function initialize() {
     if (event.key === 'Escape') renderer.clearSelection();
   });
   const controls = createControls({ onCommand: (command) => link.send(command) });
+  const eventLog = createEventLog(document.querySelector('.events'));
 
   link = connect({
     onConnectionChange(connected) {
@@ -66,10 +68,12 @@ async function initialize() {
         destinations = destinationLooks(layout.outputs);
         latest = null;
         renderer.setLayout(message);
+        eventLog.setLayout(message);
       }
       else if (message.type === 'snapshot') {
         renderer.setSnapshot(message);
         controls.setSnapshot(message);
+        eventLog.setSnapshot(message);
         latest = message;
         showPanel();
       } else if (message.type === 'error') console.warn(message.message);

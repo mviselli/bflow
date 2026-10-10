@@ -59,6 +59,14 @@ highlighted while there are any — then errors and warnings since the start,
 with what they were); hover over one for its meaning. The command-line run
 prints the same breakdown and the alarms still open at the end.
 
+Below them, the event log lists what happened in the run, newest first: the
+simulated time, the severity (error, warning or info), the bag or element
+involved and a description — faults and repairs, wrong sortings and wrong
+exits, congestions, prolonged waits, alarm acknowledgements and the operator's
+commands. The buttons above it show or hide each severity; the page keeps the
+latest 200 events, and a page opened during a run starts from the latest 100
+the server still holds. A reset empties it.
+
 If the server stops or the network drops, the page says so over the map,
 disables the commands and keeps the last state received, dimmed; it reconnects
 by itself and then shows the current state, keeping your zoom and selected belt

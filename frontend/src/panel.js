@@ -26,7 +26,7 @@ function metres(value) {
 }
 
 // A short name for any element a belt connects to.
-function elementName(id, layout) {
+export function elementName(id, layout) {
   const input = layout.inputs.find((node) => node.id === id);
   if (input) return `Check-in ${input.label}`;
   const output = layout.outputs.find((node) => node.id === id);
