@@ -76,7 +76,8 @@ simulated time, the severity (error, warning or info), the bag or element
 involved and a description — faults and repairs, wrong sortings and wrong
 exits, congestions, prolonged waits, alarm acknowledgements and the operator's
 commands. The buttons above it show or hide each severity; the page keeps the
-latest 200 events, and a page opened during a run starts from the latest 100
+latest 200 events of each severity (so a burst of information never hides
+a fault), and a page opened during a run starts from the latest 100
 the server still holds. A reset empties it.
 
 If the server stops or the network drops, the page says so over the map,

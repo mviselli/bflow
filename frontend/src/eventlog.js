@@ -5,15 +5,18 @@
 // The events arrive with the snapshots: each connection sends every event
 // once, by id, and a new connection resends the ones the engine retained.
 // addSnapshot() (pure, tested with node --test) keeps them in order without
-// duplicates, only the latest MAX_LOG_EVENTS, and starts over at a new run.
+// duplicates, only the latest MAX_LOG_EVENTS of each severity, and starts
+// over at a new run.
 // The page never makes up events: it only filters and formats them.
 
 import { count, formatTime } from './controls.js';
 import { elementName } from './panel.js';
 import { isNewRun } from './playback.js';
 
-// Events kept on the page. The history is limited so the page does not grow
-// without end; the engine counts every event anyway (the indicators).
+// Events kept on the page, for each severity. The history is limited so the
+// page does not grow without end; the engine counts every event anyway (the
+// indicators). Per severity, so that a burst of information (many bags
+// moving again after a repair) never pushes the fault itself out.
 export const MAX_LOG_EVENTS = 200;
 
 // Severities from the most to the least serious, as the filter lists them.
@@ -31,21 +34,33 @@ export function emptyLog() {
 }
 
 // The log after a snapshot: its new events appended (oldest first), without
-// those already received, keeping only the latest `max`. A new run (reset,
-// or a restarted server) starts from an empty log. `events` is a new array
+// those already received, keeping only the latest `max` of each severity. A
+// new run (reset, or a restarted server) starts from an empty log. `events` is a new array
 // only when it changed, so the caller can redraw only then.
 export function addSnapshot(log, snapshot, max = MAX_LOG_EVENTS) {
   const newRun = log.run !== null && isNewRun(log, snapshot);
   const previous = newRun ? emptyLog() : log;
   const added = snapshot.events.filter((event) => event.id > previous.lastId);
   let events = previous.events;
-  if (added.length > 0 || newRun) events = [...events, ...added].slice(-max);
+  if (added.length > 0 || newRun) events = keepLatest([...events, ...added], max);
   return {
     run: snapshot.run,
     tick: snapshot.tick,
     lastId: added.length > 0 ? added[added.length - 1].id : previous.lastId,
     events,
   };
+}
+
+// The latest `max` events of each severity, still in order.
+function keepLatest(events, max) {
+  const kept = {};
+  const latest = [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const { severity } = events[index];
+    kept[severity] = (kept[severity] ?? 0) + 1;
+    if (kept[severity] <= max) latest.push(events[index]);
+  }
+  return latest.reverse();
 }
 
 // The events of the chosen severities (a Set of ids), newest first.

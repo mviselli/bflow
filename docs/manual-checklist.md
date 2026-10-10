@@ -51,12 +51,20 @@ drawn yet, or one that is still fading out at its chute.
       the signs BF 101, BF 205, BF 312 and BF 418. No bags.
 - [ ] The toolbar reads **Start**, **Reset**, **1×** (pressed), **2×**,
       **5×**, `00:00.00 · tick 0` and **Connected**; no banner over the map.
-- [ ] The side panel reads **Details** with the selection hint.
+- [ ] The side panel reads **Plant** with the selection hint, Wrong sorting
+      `0 % of sorter passages`, Forced error **None**, Open alarms
+      `0 errors · 0 warnings`, Sorters `3`, a wrong sorting probability
+      slider at `0 %` and a **Force a wrong sorting** button.
 - [ ] Under the map, three groups of indicators: **Bag flow**
       (Generated, Waiting, Admitted, In transit), **Deliveries** (Delivered,
-      Wrong exits, Throughput, Mean travel time) and **Alarms** (Errors,
-      Warnings). Every value is `0` and the mean travel time is `—`.
+      Wrong exits, Throughput, Mean travel time) and **Alarms** (Active
+      errors, Active warnings, Errors, Warnings). Every value is `0` and the
+      mean travel time is `—`.
 - [ ] Hovering over an indicator shows its definition.
+- [ ] Below them, **Open alarms** reads **None open** (Acknowledge all
+      disabled) and the **Event log** reads **No events yet**, with three
+      severity buttons (Errors 0, Warnings 0, Info 0) all pressed.
+- [ ] Every belt has a steady green light beside it, near its start.
 - [ ] The belt surfaces do not move. The console shows no errors.
 
 ## 2. Start, pause and resume at 1×
@@ -95,8 +103,9 @@ Pause near each time and compare (the counter rules must hold exactly):
 - [ ] The values match the table (or are close to it, for a later tick).
 - [ ] After `01:00` **Throughput** is lower than **Delivered** (it counts
       only the last 60 simulated seconds).
-- [ ] **Wrong exits**, **Errors** and **Warnings** stay `0` and are not
-      highlighted (nothing in this phase causes them).
+- [ ] **Wrong exits**, the four alarm indicators, Open alarms and the Event
+      log stay at `0` / empty (with nothing stopped, faulty or missorted, the
+      plant below capacity never warns), and every light stays green.
 - [ ] The number of bags drawn on the map matches **In transit** (allowing
       for the 0.15 s lag).
 
@@ -122,10 +131,11 @@ Pause near each time and compare (the counter rules must hold exactly):
       Position (`x m of y m`), Admitted at and a Travel time that grows.
       The outline and the panel follow it from belt to belt.
 - [ ] When that bag reaches its chute, the outline disappears and the panel
-      goes back to **Details**.
+      goes back to **Plant**.
 - [ ] Click a belt (e.g. `line-1`): it is outlined and the panel shows
       **Belt line-1**: State **Running**, Bags `n of capacity`, Occupancy
-      with its bar, Length, Speed, From, To, and a **Stop belt** button.
+      with its bar, Length, Speed, From, To, Congestion **None**, Alarms
+      **None**, and the **Stop belt** and **Simulate a fault** buttons.
 - [ ] Click a check-in desk (e.g. A1): it is outlined and the panel shows
       **Check-in A1**: Waiting, Arrival rate `0.15 bags/s · 9 per min`,
       Feeds belt, and a rate slider.
@@ -135,15 +145,27 @@ Pause near each time and compare (the counter rules must hold exactly):
 
 - [ ] At about `00:30`, select `branch-2` and click **Stop belt**: State
       becomes **Stopped by the operator**, the button becomes **Restart
-      belt** and the branch's surface stops. The rest of the plant keeps
-      moving.
+      belt**, the branch's surface stops and its light turns grey. The rest
+      of the plant keeps moving. The Event log shows an info line **Belt
+      stopped by the operator** for Belt branch-2 (a stop is information, not
+      a fault).
 - [ ] Bags going to BF 205 wait at the second sorter and the line backs up:
       **Delivered** stays around 10–11, **In transit** grows (about 43 at
       `01:00`), the island belts fill up and from about `01:27` bags wait at
       the desks (**Waiting** above 0).
+- [ ] The backed-up belts warn: the first congestion at about `00:52`, the
+      first bags held still for 30 s at `01:00`. Their lights turn amber and
+      blink, **Active warnings** is highlighted and the warnings are listed
+      under Open alarms. The stopped branch's light stays grey until a bag
+      waits on it for 30 s, then turns amber too.
 - [ ] At about `01:30`, click **Restart belt**: the branch moves again,
       deliveries resume and **Waiting** goes back to `0` within about 10
-      simulated seconds.
+      simulated seconds (with a stop a few ticks after `00:30`, short queues
+      may come back now and then while the line drains, for up to a couple
+      of minutes). The prolonged waits resolve at once; the
+      congestions clear as the line drains (for a stop at `00:30.00` and a
+      restart at `01:30.00`: 9 congestions and 38 prolonged waits, so
+      **Warnings** 47, **Errors** 0, and no alarm left from `04:04.35`).
 
 ## 7. Arrival rate
 
@@ -166,7 +188,8 @@ a bag selected.
 
 - [ ] Click **Reset**: the map is empty at once, the time reads
       `00:00.00 · tick 0`, the button reads **Start**, every indicator is
-      `0` and the mean travel time is `—`.
+      `0` and the mean travel time is `—`, Open alarms reads **None open**,
+      the Event log **No events yet**, and every light is green.
 - [ ] The selected bag is no longer selected; **5×** is still pressed.
 - [ ] The stopped belt is running again and the changed desk is back to
       `0.15 bags/s` (select them to check).
@@ -196,6 +219,91 @@ a bag selected.
       then come back: the map shows the current state at once, with no fast
       replay, and the page is still **Connected**.
 
+## 10. Fault and repair
+
+Click **Reset**, **5×**, then **Start**. The reference values are for a
+fault at exactly `00:30.00` and the repair at `02:30.00` (pause at those
+times, act, then resume); a little later gives values close to them.
+
+- [ ] At `00:30`, select `line-2` and click **Simulate a fault**: State
+      reads **Faulty · needs repair** in red, Alarms **Fault · active · open
+      for … s** (highlighted), the second button becomes **Repair belt**,
+      the belt's surface stops and its light turns red and blinks. **Active
+      errors** `1` (highlighted in red) and **Errors** `1` (`1 fault · 0 wrong
+      sortings`, not highlighted); the alarm tops Open alarms; the Event log
+      has one red `error` line, Belt line-2, **Belt fault: halted until
+      repaired**.
+- [ ] Click **Stop belt** then **Restart belt**, and **Pause** then
+      **Resume**: the belt stays faulty (only Repair clears a fault).
+- [ ] Bags pile up on line-2 and behind it: **Delivered** stops at `9`; the
+      first congestion at about `00:46`, the first prolonged waits exactly
+      at `01:00.00` (30 s after the fault), bags waiting at the desks from
+      about `01:13`. At `01:00.00`: Active warnings 5; at `02:00.00`:
+      Waiting 26, In transit 73, Active warnings 73. Errors stays `1`
+      however long the fault lasts.
+- [ ] At `02:30`, click **Repair belt**: State **Running**, the light goes
+      green, **Active errors** `0` at once, **Errors** still `1`. Deliveries
+      resume, the prolonged waits resolve within about 9 s, the desks'
+      queues clear by about `06:47`, the congestions by `08:43.30`, after
+      which Open alarms reads **None open**. With demand below capacity the
+      whole backlog clears by itself.
+- [ ] In the end **Errors** `1` and **Warnings** `90` (`16 congestions ·
+      74 prolonged waits`), both not highlighted; the counter rules hold.
+
+## 11. Forced error and wrong sorting
+
+- [ ] Click **Reset** (1×). With nothing selected, click **Force a wrong
+      sorting**: Forced error reads **On the next bag sorted**, highlighted,
+      the button is disabled, and the Event log shows an info line **Wrong sorting forced on the
+      next bag**.
+- [ ] Click **Start**. At `00:20.55` bag-3 (tag 3, BF 312) is sent down the
+      first branch: Forced error goes back to **None**, the button is
+      enabled again, **Errors** `1` (`0 faults · 1 wrong sorting`) and the
+      Event log has one `error` line, bag-3 · divert-1. Selecting bag-3
+      shows **Sorting error · sent to Output BF 101** in red.
+- [ ] At `00:24.50` bag-3 drops into the BF 101 chute: the chute flashes red
+      for about 3 simulated seconds, **Wrong exits** `1` (highlighted), and
+      the Event log adds an `info` line **Arrived at the wrong output**
+      for bag-3 at Output BF 101. **Errors** stays `1`: the wrong exit is
+      not a second error. At `01:00`: Delivered 24, Wrong exits 1.
+- [ ] Wrong sorting is not an alarm: Open alarms stays **None open**.
+- [ ] Drag the probability slider to `10 %` and release: the panel reads
+      `10 % of sorter passages` and wrong sortings now happen now and then;
+      each one adds one error and, when the bag exits, one wrong exit and no
+      further error. Back to `0 %`: no more errors.
+- [ ] At 5× the red flash at a chute is short (about 0.6 real seconds) but
+      still visible.
+
+## 12. Alarm handling
+
+Use the fault of check 10 (or repeat it) with many alarms open.
+
+- [ ] Open alarms lists the alarms to acknowledge first, errors before
+      warnings, the newest first; each row shows the kind, what it concerns
+      (`Belt line-2`, `bag-… · Belt …`), its state and how long it has been
+      open, and an **Acknowledge** button.
+- [ ] Click a row (not its button): the belt or bag is selected on the map
+      and in the panel.
+- [ ] Click **Acknowledge** on the fault: it moves below the active ones as
+      **acknowledged**, the belt is still **Faulty · needs repair**, the
+      panel's Alarms row is no longer highlighted, and the belt's light
+      stops blinking (steady red) unless a bag on it still has an active
+      alarm. **Active errors** stays `1`, **Errors** does not change, and
+      the Event log adds an info line **Alarm acknowledged: …**.
+- [ ] Click **Acknowledge all**: every row reads **acknowledged**, the note
+      reads `… open · 0 to acknowledge`, the button is disabled, every light
+      is steady. New alarms raised afterwards come back blinking and active.
+- [ ] Pause for 10 real seconds: the ages of the open alarms do not change.
+- [ ] Repair the belt: the fault leaves the list; the warnings leave it as
+      the backlog clears, acknowledged or not.
+- [ ] Event log: the severity buttons hide and show their lines (e.g. only
+      Errors shows the fault and any wrong sortings — still there after the
+      repair of check 10, when about 300 events have been recorded: the page
+      keeps the latest 200 of each severity); the note then reads
+      `Latest … of N events in this run`.
+- [ ] **Reset** empties Open alarms and the Event log and turns every light
+      green.
+
 ## Record
 
 | Date | Browser | Result | Problems and fixes |
@@ -203,4 +311,5 @@ a bag selected.
 | 2026-09-26 (one-belt page, earlier version of this list) | Chrome (desktop, driven by Claude) | All checks passed (hidden tab checked by the user) | The Start/Pause button moved sideways whenever the tick gained a digit: the time label now has a fixed minimum width. The browser automation could not hide the tab, so the user ran that check. |
 | 2026-09-28 (one-belt page, earlier version of this list) | Chrome (desktop, driven by Claude) | Checks 1–6 passed after the engine gained the merge, sorter, belt stop and new statistics: first delivery at `00:11.45 · tick 229` with 9.45 s; paused at tick 602 with 15 / 0 / 15 / 5 / 10 / 0; picture and counters unchanged while paused; resume without a jump; five quick toggles left it paused; server stop and restart; reload while running. No counter rule broken over 769 updates, no console errors | None. The hidden-tab check was not repeated (the automation cannot hide the tab; nothing in the page changed since the last run). |
 | 2026-10-02 | Chrome (desktop, driven by Claude), single process on :8000 | Checks 1–9 passed except the hidden tab (pending, needs the user). Exact matches with the reference values: first bags at `00:06.70` (6), first delivery 21.6 s, rows at ticks 601, 1200 and 2400 equal to the table; counter rules held on all 1,804 updates of the first run; 31 bags counted on the map at tick 2400 = In transit; speeds measured 1.00 / 2.00 / 4.99 simulated s per real s; bag-202 followed across five belts to BF 101; branch-2 stopped at tick 598 → 43 in transit and 11 delivered at `01:00`, desks waiting from `01:26.70`, queue cleared 8.1 s after the restart; A1 at 1 bag/s → 20 waiting at `01:10`, drained in 50.3 s; Reset at 5× cleared plant, indicators and bag selection, restored branch-2 and A1, kept 5×; Start right after Reset started bag-1…6; server stop/restart and reload as described; no console errors | Check 7 first ran after check 6 on a busy plant (42 waiting, 117 s to drain, confirmed equal to an engine replay of `/api/commands`): it now starts with a Reset, and its reference values are for a fresh run. Not judged by the automation: smoothness by eye at 5× and a stopped belt's surface standing still (covered by unit tests). |
+| 2026-10-10 | Chrome (desktop, driven by Claude), single process on :8000; tab hidden throughout (time-critical actions triggered from a WebSocket handler in the page, compared with an engine replay of `/api/commands`) | Checks 1–12 passed. 1: Plant panel, four alarm tiles, None open, No events yet, all lights green. 2: first delivery 21.6 s, still for 10 s paused, no jump on resume, five toggles consistent. 3: ticks 604/1201/2400 equal to the table; counter rules held on every update (≥ 1,875 per run, also errors = faults + wrong sortings and warnings = congestions + prolonged waits). 4: 4.95 / 1.99 / 1.01 sim s per real s, speed changed while paused without moving time. 5: wheel zoom without page scroll, drag, bag-153 followed line-2 → line-3, belt line-3 panel with Stop belt and Simulate a fault, desk A1, Esc. 6: stop at tick 609, restart at 1804: Delivered 11 and In transit 43 at `01:00` (replay), 47 warnings (9 congestions, 38 prolonged waits), 0 errors, no alarm from `04:04.45`; queue at 0 at tick 1965 (8 s after the restart), then short queues again until tick 2555 (replay identical). 7: A1 at 1 bag/s from tick 206 → 20 waiting at `01:10`, drained in 46.7 s. 8: Reset with branch-3 stopped and faulty, A1 at 0 and bag-233 selected → everything cleared, 5× kept; Start right after Reset started run 6 from bag-1; `/api/commands` began with the reset. 9: disconnection banner, every control disabled, lists dimmed; reconnected ~2.4 s after the restart with zoom and line-2 kept; reload while running showed the current time in 0.29 s. 10: fault at `00:30.10` (one error line, Repair offered, Stop/Restart and Pause/Resume left it faulty); `01:00`: 9 delivered, 5 active warnings; `02:00`: Waiting 26, In transit 73, 73 active warnings; repair at tick 3003 → Active errors 0 at once, waits resolved by `02:39.25`, all alarms resolved at `08:44.40`, Errors 1, Warnings 90 (16 + 74). 11: forced error decided at `00:20.55` (bag-3, divert-1), wrong exit at `00:24.50` at BF 101, Errors 1 not 2, no alarm; the chute's red flash seen (paused on a second forced error); 10 % → 21 wrong sortings, each followed by exactly one wrong exit, none after 0 %. 12: order active → acknowledged, errors first, newest first; row click selected bag-76; acknowledging the fault: one info event, belt still faulty, Active errors 1, Errors unchanged; Acknowledge all → 0 to acknowledge, lights steady; ages frozen for 10 s paused; new alarms come back active; Reset empties both lists. No console or server errors | Check 12 first failed: after the long fault (294 events) the error filter was empty — the ~200 info lines that follow a repair had pushed the fault out of the page's single 200-event history. The page now keeps the latest 200 events of each severity; re-run: 216 events, the fault still listed under Errors after the recovery. Check 3's "bags drawn = In transit" and check 2's smoothness by eye could not be judged with the tab hidden (`requestAnimationFrame` does not run: the map updates only when a screenshot is taken, and a click can hit a bag of an earlier frame). |
 | 2026-10-05 | Chrome (desktop, driven by Claude), single process on :8000 | Checks 1–9 passed. First bags at `00:06.70` (6), first delivery 21.6 s; tick 600 and 1200 rows equal to the table, tick 2399 equal to the engine (the 18th arrivals land on tick 2400); counter rules held on all 3,883 updates read by a second WebSocket; bags on the map = In transit (29 at tick 1200); picture and tick unchanged after 10 s paused; resume without a jump; speeds measured 5.00 / 2.05 / 1.02 simulated s per real s, speed changed while paused without moving time; bag-95 followed across island-b-4, line-1 and branch-1 to BF 101; branch-2 stopped at tick 594 → 43 in transit and 11 delivered at `01:00`, desks waiting from `01:26.70` (both from an engine replay of `/api/commands`, which matched the page at tick 1795), queue cleared 8.05 s after the restart; A1 at 1 bag/s → 21 waiting at `01:10`, drained in 49.95 s; Reset at 5× cleared plant, indicators and bag-5's selection, restored branch-2 and A1, kept 5×; Start right after Reset started a new run from bag-1, `/api/commands` = reset and start at 0; server stop/restart (zoom and branch-1 kept) and reload as described; hidden tab for 14 s → current state at once, still connected; no console errors | None. The tab could only be hidden for 14 s, not a minute (the automation brought it back); the silent-link timeout stays covered by unit tests. |

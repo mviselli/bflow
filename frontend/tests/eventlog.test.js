@@ -44,6 +44,18 @@ test('only the latest events are kept, while the note gives the whole run', () =
   assert.equal(logNote(emptyLog()), 'No events yet');
 });
 
+test('the limit is per severity, so a burst of information never pushes out a fault', () => {
+  let log = addSnapshot(emptyLog(), { run: 1, tick: 1, events: [event(1, 'error')] });
+  const burst = Array.from({ length: MAX_LOG_EVENTS + 100 }, (_, index) => index + 2);
+  log = addSnapshot(log, snapshot(1, 2, burst, 'info'));
+  assert.equal(log.events.length, MAX_LOG_EVENTS + 1);
+  assert.deepEqual(log.events[0], event(1, 'error'));
+  // Still in order: the fault, then the latest information.
+  assert.deepEqual(ids(log).slice(0, 3), [1, 102, 103]);
+  assert.equal(ids(log).at(-1), MAX_LOG_EVENTS + 101);
+  assert.deepEqual(visibleEvents(log, new Set(['error'])).map((item) => item.id), [1]);
+});
+
 test('a new run starts from an empty log, whether reset or a restarted server', () => {
   const log = addSnapshot(emptyLog(), snapshot(1, 900, [1, 2, 3]));
   // Reset: the run number changes and the new engine numbers events from 1.
