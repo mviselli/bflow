@@ -31,7 +31,7 @@
 
 import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import {
-  BELT, beltSurfaceCanvas, floorCanvas, frameCanvas, suitcaseCanvas, surfaceSpan, toTexture,
+  BELT, CANVAS_FONT, beltSurfaceCanvas, floorCanvas, frameCanvas, suitcaseCanvas, surfaceSpan, toTexture,
 } from './assets.js';
 import {
   BAGGAGE_WIDTH_M, BELT_WIDTH_M, DESK_SPAN, FIT_CAMERA, baggagePlacement, beltAngle, beltEnds,
@@ -343,6 +343,10 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     drawHighlight();
   }
   app.ticker.add(update);
+  // Signs and tags use the interface's typeface: redraw once it has loaded.
+  document.fonts?.load(`700 16px ${CANVAS_FONT}`).then(() => {
+    geometry = null;
+  });
 
   // Shows the camera at once by moving the world container over the
   // textures already drawn, then redraws them once the view stays still.

@@ -5,7 +5,10 @@
 // - strictly top-down view, sizes in metres (ctx.scale converts to pixels);
 // - light from the top-left: highlights on top/left edges, shadows falling
 //   down-right, longer for objects that stand higher above the floor;
-// - a muted terminal palette with yellow for safety markings and signs.
+// - neutral graphite and steel; colour only on the bags, their destination
+//   tags and the outputs' signs (on this console colour on the plant itself
+//   means an abnormal state, drawn by the renderer's lights);
+// - text in the interface's typeface (Atkinson Hyperlegible Next).
 // The shapes are decoration only: positions and collisions stay in Python.
 
 import { Texture } from 'pixi.js';
@@ -18,10 +21,16 @@ export const BELT = {
   railM: 0.1,                        // steel rail on each side
   surfaceM: BELT_WIDTH_M - 0.2,      // rubber surface between the rails
   slatM: 0.125,                      // distance between two slats
+  slatsPerSeam: 8,                   // the belt's laced joint, once per metre
+  rollerM: 0.5,                      // distance between two support rollers
   drumM: 0.12,                       // end drum beyond a free end of the belt
 };
 
 export const BAG_PADDING_M = 0.16;   // room around a bag for its shadow
+
+// The interface's typeface (styles.css), loaded by the page; the renderer
+// redraws once it is ready, since a canvas cannot wait for it.
+export const CANVAS_FONT = '"Atkinson Hyperlegible Next", system-ui, sans-serif';
 
 // --- Small helpers ---------------------------------------------------------
 
@@ -77,7 +86,7 @@ function text(ctx, scale, value, xM, yM, sizeM, { colour, weight = 700, align = 
   ctx.translate(xM, yM);
   ctx.rotate(-Math.atan2(b, a));
   ctx.scale(1 / scale, 1 / scale);
-  ctx.font = `${weight} ${sizeM * scale}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.font = `${weight} ${sizeM * scale}px ${CANVAS_FONT}`;
   ctx.fillStyle = colour;
   ctx.textAlign = align;
   ctx.textBaseline = 'middle';
@@ -94,22 +103,38 @@ function grain(ctx, random, xM, yM, widthM, heightM, count, sizeM, alpha) {
   }
 }
 
-// --- Belt surface: one slat, repeated by a TilingSprite ---------------------
+// --- Belt surface: one metre of slats, repeated by a TilingSprite ----------
+//
+// Seven rubber slats and the belt's laced steel joint: the slats show the
+// surface up close, the joint shows it moving on the whole-plant view, where
+// a single slat is thinner than a pixel.
 
 export function beltSurfaceCanvas(scale) {
-  const { canvas, ctx } = metreCanvas(BELT.slatM, BELT.surfaceM, scale);
+  const { canvas, ctx } = metreCanvas(BELT.slatM * BELT.slatsPerSeam, BELT.surfaceM, scale);
   const random = seededRandom(7);
   const width = canvas.width / scale;
   const height = BELT.surfaceM;
+  // The canvas is rounded to whole pixels: spread the slats over its width.
+  const pitch = width / BELT.slatsPerSeam;
 
   ctx.fillStyle = '#262b31';
   ctx.fillRect(0, 0, width, height);
-  grain(ctx, random, 0, 0, width, height, 260, 0.004, 0.18);
-  // Raised slat: a lit leading edge and a dark trailing edge.
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.09)';
-  ctx.fillRect(0, 0, 0.012, height);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-  ctx.fillRect(0.012, 0, 0.01, height);
+  grain(ctx, random, 0, 0, width, height, 260 * BELT.slatsPerSeam, 0.004, 0.18);
+  for (let i = 1; i < BELT.slatsPerSeam; i += 1) {
+    // Raised slat: a lit leading edge and a dark trailing edge.
+    const x = i * pitch;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.09)';
+    ctx.fillRect(x, 0, 0.012, height);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(x + 0.012, 0, 0.01, height);
+  }
+  // Laced joint: a band of steel clips across the belt.
+  ctx.fillStyle = '#4a535b';
+  ctx.fillRect(0, 0, 0.035, height);
+  ctx.fillStyle = '#7f8a93';
+  for (let y = 0.01; y < height - 0.02; y += 0.04) ctx.fillRect(0.004, y, 0.026, 0.022);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.fillRect(0.035, 0, 0.012, height);
   // The upper rail shades the surface just below it.
   const shadow = ctx.createLinearGradient(0, 0, 0, 0.1);
   shadow.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
@@ -353,8 +378,8 @@ function drawSign(ctx, scale, xM, yM, code, caption, codeColour) {
   ctx.beginPath();
   ctx.roundRect(xM + 0.07, yM + 0.07, height - 0.14, height - 0.14, 0.05);
   ctx.fill();
-  text(ctx, scale, code, xM + height / 2, yM + height / 2 + 0.01, 0.36, { colour: '#0b0f13', weight: 800, align: 'center' });
-  text(ctx, scale, caption, xM + height + 0.06, yM + height / 2 + 0.01, 0.3, { colour: '#f4f6f8', weight: 650 });
+  text(ctx, scale, code, xM + height / 2, yM + height / 2 + 0.01, 0.36, { colour: '#0b0f13', weight: 700, align: 'center' });
+  text(ctx, scale, caption, xM + height + 0.06, yM + height / 2 + 0.01, 0.3, { colour: '#f4f6f8', weight: 600 });
 }
 
 // A point given in a belt-aligned frame (origin, angle), as a map point.
@@ -450,6 +475,31 @@ function drawRail(ctx, random, x, width, yM) {
   ctx.strokeRect(x, yM, width, BELT.railM);
 }
 
+// The support rollers run under the belt, out of sight: from above only the
+// nuts holding their axles to the rails show, every BELT.rollerM.
+function drawRollerNuts(ctx, from, to) {
+  const first = Math.ceil((from + 0.15) / BELT.rollerM) * BELT.rollerM;
+  for (let x = first; x < to - 0.15; x += BELT.rollerM) {
+    for (const y of [-BELT_WIDTH_M / 2 + BELT.railM / 2, BELT_WIDTH_M / 2 - BELT.railM / 2]) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.beginPath();
+      ctx.arc(x + 0.005, y + 0.007, 0.026, 0, Math.PI * 2);
+      ctx.fill();
+      const nut = ctx.createLinearGradient(x - 0.022, y - 0.022, x + 0.022, y + 0.022);
+      nut.addColorStop(0, '#eef2f4');
+      nut.addColorStop(1, '#6c767e');
+      ctx.fillStyle = nut;
+      ctx.beginPath();
+      for (let k = 0; k < 6; k += 1) {
+        const angle = (k * Math.PI) / 3;
+        ctx.lineTo(x + 0.022 * Math.cos(angle), y + 0.022 * Math.sin(angle));
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
 // A square ball-transfer plate where belts meet. The sides with no belt get
 // a rail; belts are assumed to meet at right angles.
 function drawJoint(ctx, random, joint) {
@@ -504,6 +554,7 @@ export function frameCanvas({ geometry, layout, screenWidth, screenHeight, resol
       if (!beltEnd.endJoint) drawDrum(ctx, belt.length_m);
       drawRail(ctx, random, from, to - from, -BELT_WIDTH_M / 2);
       drawRail(ctx, random, from, to - from, BELT_WIDTH_M / 2 - BELT.railM);
+      drawRollerNuts(ctx, from, to);
     });
   }
   for (const joint of plantJoints(layout)) drawJoint(ctx, random, joint);
@@ -608,7 +659,7 @@ function drawTag(ctx, scale, lengthM, widthM, label, tagColour) {
   ctx.strokeStyle = '#f5f2e9';
   ctx.lineWidth = 0.02;
   ctx.stroke();
-  text(ctx, scale, label, x + width / 2, y + height / 2 + 0.008, 0.22, { colour: '#10151a', weight: 800, align: 'center' });
+  text(ctx, scale, label, x + width / 2, y + height / 2 + 0.008, 0.22, { colour: '#10151a', weight: 700, align: 'center' });
 }
 
 export function suitcaseCanvas({ style, colour, label, tagColour, lengthM, widthM, angle, scale, seed }) {
