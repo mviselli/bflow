@@ -80,6 +80,46 @@ def test_a_forced_error_sends_the_next_bag_down_a_wrong_branch_once():
     assert (stats.errors, stats.misdelivered, stats.correctly_delivered) == (1, 1, 0)
 
 
+def test_a_missorted_bag_held_on_a_faulty_branch_counts_each_problem_once():
+    # A forced wrong sorting, then a fault on the wrong branch the bag goes
+    # down: the bag waits there past 30 s, its alarms are acknowledged, the
+    # branch is repaired and the bag exits at the wrong output.
+    engine = quiet(compact_layout())
+    bag = place(engine, "collector", "bag", "output-2", at_end(engine, "collector") - 0.5)
+    engine.force_missort()
+    while bag.missorted_to_id is None:
+        engine.step()
+    branch = engine.sorter_routes["sorter"][bag.missorted_to_id]
+    engine.fault_belt(branch)
+    advance(engine, 700)
+    assert (bag.conveyor_id, bag.prolonged_wait) == (branch, True)
+    for alarm_id in list(engine.alarms):
+        engine.acknowledge_alarm(alarm_id)
+    engine.repair_belt(branch)
+    advance(engine, 400)
+    assert bag.exited_at_s is not None
+    assert kinds(engine, "missort_forced", "wrong_sorting", "belt_fault", "prolonged_wait_started",
+                 "alarm_acknowledged", "belt_repaired", "prolonged_wait_resolved", "wrong_exit") == [
+        (Severity.INFO, "missort_forced", None, None),
+        (Severity.ERROR, "wrong_sorting", "sorter", "bag"),
+        (Severity.ERROR, "belt_fault", branch, None),
+        (Severity.WARNING, "prolonged_wait_started", branch, "bag"),
+        (Severity.INFO, "alarm_acknowledged", branch, None),
+        (Severity.INFO, "alarm_acknowledged", branch, "bag"),
+        (Severity.INFO, "belt_repaired", branch, None),
+        (Severity.INFO, "prolonged_wait_resolved", branch, "bag"),
+        (Severity.INFO, "wrong_exit", bag.missorted_to_id, "bag"),
+    ]
+    stats = engine.stats()
+    # Two errors (the sorting, the fault), one warning (the wait), one wrong
+    # exit; acknowledging, repairing and exiting count nothing more.
+    assert (stats.errors, stats.wrong_sortings, stats.faults) == (2, 1, 1)
+    assert (stats.warnings, stats.prolonged_waits) == (1, 1)
+    assert (stats.misdelivered, stats.correctly_delivered) == (1, 0)
+    assert (stats.active_errors, stats.active_warnings) == (0, 0)
+    assert stats.is_conserved
+
+
 def test_a_forced_error_takes_only_one_bag():
     engine = quiet(compact_layout())
     first = place(engine, "collector", "first", "output-1", 4.0)

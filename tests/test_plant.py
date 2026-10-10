@@ -89,7 +89,10 @@ class PlantChecker:
         self.conditions = set()
         self.once_seen = set()
         # Every event seen, by kind: the engine's history keeps only the latest.
+        # Also the tick of the first and last event of each kind.
         self.event_counts = Counter()
+        self.first_tick = {}
+        self.last_tick = {}
         self.remember()
 
     def remember(self):
@@ -149,6 +152,9 @@ class PlantChecker:
         self.check_prolonged_waits(on_belts, events)
         self.check_alarms(on_belts, events)
         self.event_counts.update(event.kind for event in events)
+        for event in events:
+            self.first_tick.setdefault(event.kind, event.tick)
+            self.last_tick[event.kind] = event.tick
         self.last_event_id = engine.events.last_id
         self.remember()
 
@@ -510,6 +516,37 @@ def test_after_a_fault_is_repaired_the_queue_clears_while_demand_is_below_capaci
     engine = run(*SCENARIOS["demo: line 2 faulty for 120 s"])
     assert engine.waiting_count == 0
     assert engine.stats().errors == 1
+
+
+def test_a_fault_queues_warns_and_after_the_repair_the_plant_recovers_in_that_order():
+    # The phase's story on the demo plant, demand below capacity, every tick
+    # under the checker: line 2 faulty from tick 3000, repaired at 5400.
+    checker = run_checked(*SCENARIOS["demo: line 2 faulty for 120 s"])
+    engine, first, last = checker.engine, checker.first_tick, checker.last_tick
+    fault, repair = first["belt_fault"], first["belt_repaired"]
+    assert (fault, repair) == (3000, 5400)
+    # Nothing to warn about before the fault.
+    assert min(first[kind] for kind in ("congestion_started", "prolonged_wait_started",
+                                        "entrance_queue_started")) > fault
+    # Faulty: the line fills, the bags held on it warn exactly 30 s after
+    # it stopped, and the queue reaches the desks before the repair.
+    assert first["prolonged_wait_started"] == fault + 600
+    assert fault < first["congestion_started"] < first["entrance_queue_started"] < repair
+    # Repaired: every waiting bag moves again, and the desks' queues clear.
+    assert repair < first["prolonged_wait_resolved"]
+    assert checker.event_counts["prolonged_wait_resolved"] == checker.event_counts["prolonged_wait_started"]
+    assert checker.event_counts["entrance_queue_cleared"] == checker.event_counts["entrance_queue_started"]
+    assert engine.waiting_count == 0
+    # Then the congestions clear as the backlog drains, and no alarm is left.
+    while engine.alarms:
+        assert engine.tick < 20000
+        engine.step()
+        checker.check()
+    stats = engine.stats()
+    assert (stats.errors, stats.faults, stats.active_errors, stats.active_warnings) == (1, 1, 0, 0)
+    assert stats.warnings == checker.event_counts["congestion_started"] + checker.event_counts[
+        "prolonged_wait_started"]
+    assert stats.is_conserved
 
 
 def test_acknowledged_alarms_stay_open_until_the_repair_and_the_queue_clears():

@@ -5,12 +5,13 @@ import asyncio
 import pytest
 
 from bflow.core.engine import Engine
-from bflow.core.layout import default_layout
+from bflow.core.layout import default_layout, minimal_layout
+from bflow.core.models import Baggage
 from bflow.server import runner as runner_module
 from bflow.server.protocol import (
     AcknowledgeAlarmCommand, FaultBeltCommand, ForceMissortCommand, PauseCommand, RepairBeltCommand, ResetCommand,
     RestartBeltCommand, SetMissortProbabilityCommand, SetRateCommand, SetSpeedCommand,
-    StartCommand, StopBeltCommand,
+    StartCommand, StopBeltCommand, snapshot_message,
 )
 from bflow.server.runner import MAX_RECORDED_COMMANDS, MAX_TICKS_PER_UPDATE, Runner, apply_to_engine
 
@@ -197,15 +198,30 @@ def test_the_same_commands_give_the_same_run_at_any_speed():
         runner.update()
         commands = {600: StopBeltCommand(type="stop_belt", belt_id="line-2"),
                     1200: RestartBeltCommand(type="restart_belt", belt_id="line-2"),
-                    1500: SetRateCommand(type="set_rate", input_id="input-a1", rate_bags_s=0.5)}
-        while runner.engine.tick < 2400:
+                    1500: SetRateCommand(type="set_rate", input_id="input-a1", rate_bags_s=0.5),
+                    # A fault long enough to raise warnings, its alarm acknowledged,
+                    # a forced wrong sorting, then the repair.
+                    1800: FaultBeltCommand(type="fault_belt", belt_id="line-1"),
+                    1900: acknowledge(1),
+                    2000: ForceMissortCommand(type="force_missort"),
+                    3000: RepairBeltCommand(type="repair_belt", belt_id="line-1")}
+        while runner.engine.tick < 4800:
             if runner.engine.tick in commands:
                 runner.submit(commands.pop(runner.engine.tick))
             clock.now += 0.05 / factor  # one tick per update
             runner.update()
+        assert not commands
         engine = runner.engine
         results.append((engine.stats(), [(b.id, b.conveyor_id, b.position_m)
-                                         for c in engine.conveyors.values() for b in c.baggage]))
+                                         for c in engine.conveyors.values() for b in c.baggage],
+                        [(e.id, e.tick, e.kind, e.element_id, e.baggage_id, e.alarm_id)
+                         for e in engine.events.recent],
+                        [(a.id, a.state, a.raised_at_s, a.acknowledged_at_s, a.resolved_at_s)
+                         for a in (*engine.alarms.values(), *engine.resolved_alarms)]))
+    # The problems happened and were counted once each, the same way at both speeds.
+    stats = results[0][0]
+    assert (stats.faults, stats.wrong_sortings, stats.misdelivered) == (1, 1, 1)
+    assert stats.prolonged_waits > 0 and stats.congestions > 0
     assert results[0] == results[1]
 
 
@@ -311,6 +327,94 @@ def test_an_acknowledged_fault_stays_until_the_repair_and_pause_freezes_its_age(
     assert (alarm.state, alarm.resolved_at_s) == ("resolved", 1.0)
     assert recorded(runner)[1:] == [(0, "fault_belt"), (20, "acknowledge_alarm"), (20, "pause"),
                                     (20, "start"), (20, "repair_belt")]
+
+
+def run_ticks(runner, clock, ticks):
+    """Moves the fake clock until ``ticks`` more ticks have run at 1×."""
+    target = runner.engine.tick + ticks
+    while runner.engine.tick < target:
+        clock.now += min(1.0, (target - runner.engine.tick) * 0.05)
+        runner.update()
+    assert runner.engine.tick == target
+
+
+def test_pause_freezes_the_warning_thresholds_while_real_time_passes():
+    # The minimal belt, stopped with 10 bags of 12 (above 80 %): congestion
+    # after 201 ticks, prolonged waits after 600. Real time spent paused,
+    # however long, counts for neither.
+    engine = Engine(minimal_layout(arrival_rate_bags_s=0))
+    conveyor = engine.conveyors["belt-1"]
+    conveyor.baggage.extend(Baggage(f"bag-{index}", "output-1", 0.6, 0, "belt-1", index * 0.8,
+                                    entered_at_s=0) for index in range(10))
+    engine.generated_count = engine.admitted_count = 10
+    clock = FakeClock()
+    runner = Runner(engine, clock=clock)
+    runner.submit(StopBeltCommand(type="stop_belt", belt_id="belt-1"))
+    runner.submit(START)
+    runner.update()
+
+    def paused_for(seconds):
+        runner.submit(PAUSE)
+        runner.update()
+        clock.now += seconds
+        assert runner.update() == 0
+        runner.submit(START)
+        runner.update()
+
+    run_ticks(runner, clock, 200)
+    paused_for(120)
+    assert runner.engine.tick == 200 and not conveyor.congested
+    run_ticks(runner, clock, 1)
+    assert conveyor.congested
+    run_ticks(runner, clock, 398)
+    paused_for(600)
+    assert runner.engine.tick == 599
+    assert not any(bag.prolonged_wait for bag in conveyor.baggage)
+    run_ticks(runner, clock, 1)
+    assert all(bag.prolonged_wait for bag in conveyor.baggage)
+    stats = runner.engine.stats()
+    assert (stats.congestions, stats.prolonged_waits, stats.active_warnings) == (1, 10, 11)
+    assert [(event.tick, event.kind) for event in runner.engine.events.recent
+            if event.kind == "congestion_started"] == [(201, "congestion_started")]
+    assert {event.tick for event in runner.engine.events.recent
+            if event.kind == "prolonged_wait_started"} == {600}
+
+
+def test_a_reset_during_a_fault_leaves_nothing_of_the_old_run():
+    # Faulty line, stopped branch, congestion and prolonged waits open, an
+    # acknowledged alarm, a forced error pending, a wrong-sorting probability.
+    runner, clock = make_runner()
+    runner.submit(START)
+    runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-2"))
+    runner.submit(StopBeltCommand(type="stop_belt", belt_id="branch-1"))
+    runner.submit(SetMissortProbabilityCommand(type="set_missort_probability", probability=0.3))
+    runner.update()
+    run_ticks(runner, clock, 3000)
+    runner.submit(acknowledge(1))
+    runner.submit(ForceMissortCommand(type="force_missort"))
+    runner.update()
+    old = runner.engine
+    assert {alarm.kind for alarm in old.alarms.values()} == {"belt_fault", "congestion", "prolonged_wait"}
+    assert old.stats().errors >= 1 and old.missort_forced
+
+    runner.submit(ResetCommand(type="reset"))
+    runner.update()
+    snapshot = snapshot_message(runner.engine, running=runner.running, run=runner.run_number)
+    assert (snapshot.tick, snapshot.running, snapshot.run) == (0, False, 2)
+    assert not any(belt.stopped or belt.faulty or belt.congested for belt in snapshot.belts)
+    assert (snapshot.alarms, snapshot.events, snapshot.baggage) == ([], [], [])
+    assert (snapshot.missort_probability, snapshot.missort_forced) == (0.0, False)
+    stats = snapshot.stats
+    assert (stats.errors, stats.warnings, stats.active_errors, stats.active_warnings) == (0, 0, 0, 0)
+    assert (stats.faults, stats.wrong_sortings, stats.congestions, stats.prolonged_waits) == (0, 0, 0, 0)
+    assert (runner.engine.events.last_id, runner.engine.last_alarm_id) == (0, 0)
+    # The new run numbers and counts from the start: its first fault is
+    # event 1, alarm 1 and error 1, whatever the old run had.
+    runner.submit(FaultBeltCommand(type="fault_belt", belt_id="line-2"))
+    runner.update()
+    event, = runner.engine.events.recent
+    assert (event.id, event.kind, event.alarm_id) == (1, "belt_fault", 1)
+    assert runner.engine.stats().errors == 1
 
 
 def test_an_alarm_not_raised_yet_is_refused_and_a_reset_clears_the_alarms():
