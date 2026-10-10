@@ -48,8 +48,11 @@ drawn yet, or one that is still fading out at its chute.
 - [ ] The map shows the whole plant: two islands of three check-in desks
       (signs A1–A3 at the top, B1–B3 at the bottom), their belts joining at
       the merges, the sort line with three sorters and four chutes with
-      the signs BF 101, BF 205, BF 312 and BF 418. No bags. Beside each
-      desk an empty queue lane, with no passengers.
+      the signs BF 101, BF 205, BF 312 and BF 418, each with a counter at
+      `0`. No bags. Beside each desk an empty queue lane, with no
+      passengers. Each sorter's plate has a steel gate lying along its far
+      rail, and a photo-eye (two small housings on the rails, a dark LED)
+      just before it. No belt has coloured edges.
 - [ ] The page fills the window with no page scroll. The top bar reads
       **Start**, **Reset**, **1×** (pressed), **2×**, **5×**, `00:00.00`,
       `tick 0` and **Live**; no banner over the map.
@@ -88,6 +91,13 @@ drawn yet, or one that is still fading out at its chute.
 - [ ] At merges the belts take turns; each bag leaves the sort line on the
       branch whose sign has the colour and number of its tag (a 4 tag goes
       to the end of the line, BF 418).
+- [ ] Zoomed in on a sorter: as a bag for its branch comes near, the gate
+      swings a quarter turn across the straight exit and the bag turns into
+      the branch past it; for a bag going straight on the gate lies along
+      the rail. The photo-eye's LED lights white while a bag covers it.
+      Pause: the gate stops mid-swing, if it was moving.
+- [ ] Each chute's counter goes up by one as a bag drops into it, and
+      matches the sum shown under **Delivered**.
 - [ ] The first delivery comes at `00:28.30`: **Delivered** 1, **Throughput**
       1, **Mean travel time** `21.6 s`.
 - [ ] Click **Pause** (button → **Resume**): bags and belt surfaces stop
@@ -155,14 +165,18 @@ Pause near each time and compare (the counter rules must hold exactly):
 
 - [ ] At about `00:30`, select `branch-2` and click **Stop belt**: State
       becomes **Stopped by the operator**, the button becomes **Restart
-      belt**, the branch's surface stops and its light becomes a blue square.
+      belt**, the branch's surface stops, its light becomes a blue square
+      and both its edges turn solid blue.
       The rest of the plant keeps moving. The Events page shows an info line **Belt
       stopped by the operator** for Belt branch-2 (a stop is information, not
       a fault).
 - [ ] Bags going to BF 205 wait at the second sorter and the line backs up:
       **Delivered** stays around 10–11, **In transit** grows (about 43 at
       `01:00`), the island belts fill up and from about `01:27` bags wait at
-      the desks (**Waiting** above 0).
+      the desks (**Waiting** above 0). A congested belt's edges show long
+      amber dashes; a bag still for 30 s carries a small amber clock on its
+      rear end, also on belts that are not congested (its belt's light is
+      an amber triangle either way).
 - [ ] The backed-up belts warn: the first congestion at about `00:52`, the
       first bags held still for 30 s at `01:00`. Their lights become amber
       triangles and blink, **Active warnings** is highlighted in the strip,
@@ -247,7 +261,8 @@ Click **Reset**, **5×**, then **Start**. The reference values are for a
 fault at exactly `00:30.00` and the repair at `02:30.00` (pause at those
 times, act, then resume); a little later gives values close to them.
 
-- [ ] At `00:30`, select `line-2` and click **Simulate a fault**: State
+- [ ] At `00:30`, select `line-2` and click **Simulate a fault**: its
+      edges show short red dashes (over any amber of a congestion), State
       reads **Faulty · needs repair** in red, Alarms **Fault · active · open
       for … s** (highlighted), the second button becomes **Repair belt**,
       the belt's surface stops and its light becomes a red cross and blinks.
@@ -284,7 +299,8 @@ times, act, then resume); a little later gives values close to them.
       highlighted, and the Events page shows an info line **Wrong sorting
       forced on the next bag**.
 - [ ] Click **Start**. At `00:20.55` bag-3 (tag 3, BF 312) is sent down the
-      first branch: Forced error goes back to **None**, the button is
+      first branch — the first sorter's gate, lying along the rail for it,
+      swings across the straight exit just as it is sorted: Forced error goes back to **None**, the button is
       enabled again, **Errors** `1` (`0 faults · 1 wrong sorting`) and the
       Events page has one `error` line, bag-3 · divert-1. Selecting bag-3
       shows **Sorting error · sent to Output BF 101** in red.

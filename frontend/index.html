@@ -132,6 +132,15 @@
               <li><i class="glyph" data-state="fault"></i><span><b>Fault</b> The belt is broken and needs a repair.</span></li>
               <li><i class="glyph blinking" data-state="fault"></i><span><b>Blinking</b> An alarm on the belt has not been acknowledged yet.</span></li>
             </ul>
+            <h3>Belts and bags</h3>
+            <ul class="legend-list">
+              <li><i class="edge" data-state="stopped"></i><span><b>Solid blue edges</b> The belt is stopped by the operator.</span></li>
+              <li><i class="edge" data-state="congested"></i><span><b>Long amber dashes</b> The belt is congested.</span></li>
+              <li><i class="edge" data-state="fault"></i><span><b>Short red dashes</b> The belt is faulty.</span></li>
+              <li><i class="wait-clock"></i><span><b>Clock on a bag</b> The bag has not moved for 30 s.</span></li>
+            </ul>
+            <h3>Sorters and chutes</h3>
+            <p class="page-note">A sorter's gate swings across the line to send the next bag into its branch, as the simulation decides; the light before it turns white while a bag passes. Each chute's counter shows the bags delivered there correctly.</p>
             <h3>Check-in queues</h3>
             <p class="page-note">Each passenger in a desk's lane is one bag waiting to go onto its belt. The first one leaves as soon as their bag is taken; <b>+N</b> counts those who do not fit in the lane.</p>
             <h3>Destinations</h3>

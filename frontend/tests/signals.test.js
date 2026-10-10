@@ -1,7 +1,9 @@
 // Map signals: belt status lights and the wrong-arrival signal at outputs.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addWrongExits, beltLights, WRONG_EXIT_SIGNAL_S, wrongExitSignals } from '../src/signals.js';
+import {
+  addWrongExits, beltLights, beltStates, dashes, WRONG_EXIT_SIGNAL_S, wrongExitSignals,
+} from '../src/signals.js';
 
 function belt(id, { stopped = false, faulty = false, congested = false } = {}) {
   return { id, stopped, faulty, congested };
@@ -70,4 +72,21 @@ test('an output signals from the arrival, in displayed time, for a few seconds',
 test('a second wrong arrival at the same output starts its signal again', () => {
   const arrivals = [{ outputId: 'output-1', timeS: 20 }, { outputId: 'output-1', timeS: 21.5 }];
   assert.equal(wrongExitSignals(arrivals, 22.25).get('output-1'), 0.25);
+});
+
+test("a belt's edges show its own condition: fault, then congestion, then stop; not a waiting bag", () => {
+  const states = beltStates({
+    belts: [
+      belt('a'), belt('b', { stopped: true }), belt('c', { congested: true, stopped: true }),
+      belt('d', { faulty: true, congested: true, stopped: true }), belt('e'),
+    ],
+    alarms: [alarm(3, 'prolonged_wait', 'active', 'e', 'bag-4')],
+  });
+  assert.deepEqual(Object.fromEntries(states), { b: 'stopped', c: 'congested', d: 'fault' });
+});
+
+test('a dashed edge is cut into dashes and gaps, the last dash ending at the belt end', () => {
+  assert.deepEqual(dashes(0, 2, 0.5, 0.25), [[0, 0.5], [0.75, 1.25], [1.5, 2]]);
+  assert.deepEqual(dashes(1, 2.2, 0.5, 0.5), [[1, 1.5], [2, 2.2]]);
+  assert.deepEqual(dashes(0.5, 3, 1, 0), [[0.5, 3]]);
 });

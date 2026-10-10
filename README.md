@@ -53,6 +53,11 @@ map to zoom, drag to move the view and use the buttons in its corner to zoom
 or see the whole plant again. Click a bag, a belt or a check-in desk to see
 its details on the **Details** page (a belt's state and occupancy, a bag's
 destination, position and travel time, a desk's queue and arrival rate).
+A belt's edges show its state — solid blue when stopped by the operator,
+long amber dashes when congested, short red dashes when faulty — and a bag
+that has not moved for 30 s carries a small amber clock. Each sorter's gate
+swings into its branch for the bags the simulation sends there, and each
+chute counts its deliveries.
 Passengers queue in a lane beside a desk while their bags wait for room on
 its belt: one passenger per waiting bag, the first leaving as soon as their
 bag is taken.

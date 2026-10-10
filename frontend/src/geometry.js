@@ -132,6 +132,15 @@ export function panBy(layout, camera, screenWidth, screenHeight, dx, dy) {
   return clampCamera(layout, { zoom: camera.zoom, centre }, screenWidth, screenHeight);
 }
 
+// A point given in a frame with its origin at `origin` and x along `angle`
+// (y to the right of x), as a map point.
+export function frameToMap(origin, angle, x, y) {
+  return {
+    x_m: origin.x_m + x * Math.cos(angle) - y * Math.sin(angle),
+    y_m: origin.y_m + x * Math.sin(angle) + y * Math.cos(angle),
+  };
+}
+
 // Direction of travel of a belt, in radians (0 = right, π/2 = down).
 export function beltAngle(belt) {
   return Math.atan2(belt.end.y_m - belt.start.y_m, belt.end.x_m - belt.start.x_m);

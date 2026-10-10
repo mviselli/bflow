@@ -159,6 +159,14 @@ class InputStatsState(Message):
     waiting: int = Field(ge=0)
 
 
+class OutputStatsState(Message):
+    """Bags that arrived at one output: for it, or for another output."""
+
+    output_id: str = Field(min_length=1)
+    correctly_delivered: int = Field(ge=0)
+    misdelivered: int = Field(ge=0)
+
+
 class StatsState(Message):
     """Counters computed by the engine; the browser displays them as they are."""
 
@@ -181,9 +189,10 @@ class StatsState(Message):
     active_warnings: int = Field(ge=0)
     # Correct deliveries in the last 60 simulated seconds.
     throughput: int = Field(ge=0)
-    # One entry per belt and per input, in layout order.
+    # One entry per belt, per input and per output, in layout order.
     belts: list[BeltStatsState]
     inputs: list[InputStatsState]
+    outputs: list[OutputStatsState]
 
 
 class EventState(TimedMessage):

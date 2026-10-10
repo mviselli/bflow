@@ -23,6 +23,30 @@ export function beltLights(snapshot) {
   return lights;
 }
 
+// The condition shown along a belt's own edges: faulty, else congested,
+// else stopped by the operator; running belts are left out. Unlike its
+// light, a prolonged wait does not count: it is a bag's condition, shown on
+// the bag, so a congested belt and a bag waiting on a free belt look
+// different. Belt id → 'fault' | 'congested' | 'stopped'.
+export function beltStates(snapshot) {
+  const states = new Map();
+  for (const belt of snapshot.belts) {
+    const state = belt.faulty ? 'fault' : belt.congested ? 'congested' : belt.stopped ? 'stopped' : null;
+    if (state) states.set(belt.id, state);
+  }
+  return states;
+}
+
+// The dashes of a line from `from` to `to` metres along a belt: [start,
+// end] pairs, `onM` long with `offM` between them, the last one cut at
+// `to`. A solid line is one dash.
+export function dashes(from, to, onM, offM) {
+  if (offM <= 0) return [[from, to]];
+  const result = [];
+  for (let start = from; start < to; start += onM + offM) result.push([start, Math.min(start + onM, to)]);
+  return result;
+}
+
 // How long an output signals a wrong arrival, in simulated seconds: it
 // follows the displayed time, so it lines up with the bag reaching the
 // output in the picture and stands still while paused.

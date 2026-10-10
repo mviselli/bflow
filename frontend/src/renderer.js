@@ -19,12 +19,20 @@
 // desk or a belt selects it: an outline follows it and onSelect reports it.
 // A halted belt (stopped by the operator or faulty) keeps its surface still.
 //
+// Each sorter's mechanisms sit over the frames, under the bags (sorters.js
+// decides what they show): a divert flap on its plate, swung towards the
+// branch of the bag about to pass, and a photo-eye across the belt entering
+// it, its LED lit while a bag covers the beam. Each output's sign shows its
+// deliveries in a counter (the newest snapshot, like the indicators).
+//
 // Signals sit over the frames (signals.js decides what they show): a status
 // light beside each belt, with its own symbol and colour — a small grey dot
 // running, a blue square stopped by the operator, an amber triangle for a
 // warning, a red circle with a cross faulty — blinking while an alarm of the
-// belt is not acknowledged, and a red pulse over an output's chute when a
-// bag arrives there by mistake.
+// belt is not acknowledged; the belt's own condition along both its edges —
+// solid blue stopped, long amber dashes congested, short red dashes faulty;
+// a small amber clock on a bag in a prolonged wait (over the bags); and a red
+// pulse over an output's chute when a bag arrives there by mistake.
 //
 // A resize (the window, or the side panel opening or closing) is shown like
 // a camera move: the textures already drawn are scaled at once and redrawn
@@ -32,12 +40,12 @@
 
 import { Container, Graphics, Sprite, Text, TilingSprite } from 'pixi.js';
 import {
-  BELT, CANVAS_FONT, PASSENGER_ANCHOR, beltSurfaceCanvas, floorCanvas, frameCanvas, passengerCanvas,
-  suitcaseCanvas, surfaceSpan, toTexture,
+  BELT, CANVAS_FONT, EYE, PASSENGER_ANCHOR, beltSurfaceCanvas, floorCanvas, frameCanvas, outputSign,
+  passengerCanvas, suitcaseCanvas, surfaceSpan, toTexture,
 } from './assets.js';
 import {
   BAGGAGE_WIDTH_M, BELT_WIDTH_M, DESK_SPAN, FIT_CAMERA, baggagePlacement, beltAngle, beltEnds,
-  clampCamera, panBy,
+  clampCamera, frameToMap, panBy,
   pickAt, plantGeometry, pointAlong, samePlant, zoomAround,
 } from './geometry.js';
 import { destinationLooks, hashString, shortCode, suitcaseLook } from './looks.js';
@@ -45,7 +53,8 @@ import {
   LANE, MAX_SHOWN, addQueueSnapshot, deskToMap, passengerLook, passengersAt, queuePoint,
 } from './passengers.js';
 import { advanceSurface, createPlayback, isNewRun } from './playback.js';
-import { addWrongExits, beltLights, wrongExitSignals } from './signals.js';
+import { addWrongExits, beltLights, beltStates, dashes, wrongExitSignals } from './signals.js';
+import { eyeAlong, eyeBlocked, flapTargets, sorterBranches, stepFlap } from './sorters.js';
 
 // Real time in seconds, for the display clock.
 function nowSeconds() {
@@ -72,10 +81,29 @@ const BLINK_ON = 0.6;
 const WRONG_EXIT_COLOUR = 0xf0524f;
 // Passenger textures are drawn for this many facings, a full turn.
 const PASSENGER_FACINGS = 32;
+// A belt's condition along its edges: dash and gap lengths in metres (no
+// gap: solid) and the line's width.
+const EDGE_PATTERNS = {
+  stopped: { onM: 1, offM: 0, widthM: 0.08 },
+  congested: { onM: 0.5, offM: 0.3, widthM: 0.08 },
+  fault: { onM: 0.18, offM: 0.14, widthM: 0.12 },
+};
+const STATE_OF_EDGE = { stopped: 'stopped', congested: 'warning', fault: 'fault' };
+// Divert flap: a gate hinged at the downstream corner of the plate on the
+// side away from its branch. Closed (straight on) it lies along that side's
+// rail; open it swings a quarter turn across the straight exit, so bags
+// turn into the branch. Bags turn at the plate's centre, clear of it.
+const FLAP_LENGTH_M = 0.8;
+const FLAP_OPEN_RAD = Math.PI / 2;
+const STEEL = 0xc3ccd3;
+const STEEL_DARK = 0x22272c;
+const EYE_LIT = 0xf4f6f8;
+const EYE_DARK = 0x4a535b;
+const COUNTER_FONT = '"B612 Mono", ui-monospace, monospace';
 
 // Outline of a rectangle along a belt: from `from` to `to` metres along it,
 // `widthM` wide, in screen pixels of `geometry`.
-function outlineAlong(graphics, geometry, belt, from, to, widthM) {
+function outlineAlong(graphics, geometry, belt, from, to, widthM, color = SELECTION_COLOUR) {
   const angle = beltAngle(belt);
   const across = { x: -Math.sin(angle) * widthM / 2, y: Math.cos(angle) * widthM / 2 };
   const corners = [
@@ -85,7 +113,7 @@ function outlineAlong(graphics, geometry, belt, from, to, widthM) {
     x_m: point.x_m + side * across.x, y_m: point.y_m + side * across.y,
   }));
   graphics.poly(corners.flatMap(({ x, y }) => [x, y]))
-    .stroke({ width: 2, color: SELECTION_COLOUR, alignment: 1 });
+    .stroke({ width: 2, color, alignment: 1 });
 }
 
 // A belt light's symbol, centred on (x, y) and about `radius` in size.
@@ -115,9 +143,12 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   const frame = new Sprite();
   const signals = new Graphics();
   const highlight = new Graphics();
+  const counters = new Container();
+  const mechanisms = new Graphics();
   const people = new Container();
   const bagLayer = new Container();
-  world.addChild(floor, surfaceLayer, frame, people, signals, highlight, bagLayer);
+  const badges = new Graphics();
+  world.addChild(floor, surfaceLayer, frame, counters, mechanisms, people, signals, highlight, bagLayer, badges);
   app.stage.addChild(world);
 
   let layout = null;
@@ -133,8 +164,13 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   let haltedBelts = new Set();    // belts stopped or faulty, from the newest snapshot
   let newest = null;              // the newest snapshot
   let lights = new Map();         // belt id → { state, blinking }, from the newest snapshot
+  let edges = new Map();          // belt id → its own condition, from the newest snapshot
   let wrongExits = [];            // recent wrong arrivals, { outputId, timeS }
   let queues = new Map();         // input id → its queue, from the snapshots (passengers.js)
+  let sorters = new Map();        // sorter id → its belts and branches (sorters.js)
+  let ends = new Map();           // belt id → its ends (geometry.js beltEnds)
+  const flaps = new Map();        // sorter id → (branch belt id → how open its flap is, 0 … 1)
+  let flapTime = null;            // simulated time the flaps were last moved to
   const surfaceOffsets = new Map(); // belt id → offset of its surface in metres
   let surfaceTime = null;         // simulated time the surfaces were last moved to
   let resolution = 1;
@@ -206,7 +242,33 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       surfaces.set(belt.id, surface);
     }
 
+    for (const counter of counters.removeChildren()) counter.destroy();
+    for (const output of layout.outputs) {
+      const sign = outputSign(output, layout.belts.find((belt) => belt.target_id === output.id));
+      const counter = new Text({
+        text: '',
+        style: { fontFamily: COUNTER_FONT, fontWeight: '700', fill: 0xe8eef3, fontSize: geometry.toPixels(0.34) },
+        resolution,
+      });
+      counter.anchor.set(0.5);
+      const centre = geometry.toScreen(sign.counter);
+      counter.position.set(centre.x, centre.y + geometry.toPixels(0.01));
+      counter.label = output.id;
+      counters.addChild(counter);
+    }
+    updateCounters();
+
     for (const texture of old) texture.destroy(true);
+  }
+
+  // Each output's correct deliveries, from the newest snapshot.
+  function updateCounters() {
+    if (!newest) return;
+    const delivered = new Map(newest.stats.outputs.map((node) => [node.output_id, node.correctly_delivered]));
+    for (const counter of counters.children) {
+      const text = String(delivered.get(counter.label) ?? 0);
+      if (counter.text !== text) counter.text = text;
+    }
   }
 
   function bagTexture(baggage, angle) {
@@ -342,6 +404,63 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     }
   }
 
+  // A point of a sorter's frame (x along the belt entering it, y to its
+  // right), on screen.
+  function sorterPoint(sorter, x, y) {
+    return geometry.toScreen(frameToMap(sorter.position, beltAngle(sorter.incoming), x, y));
+  }
+
+  // Divert flaps, turned towards their targets at a steady pace in
+  // displayed time, and the photo-eyes' beams and LEDs.
+  function drawMechanisms(timeS) {
+    const dtS = flapTime === null ? 0 : timeS - flapTime;
+    flapTime = timeS;
+    const targets = flapTargets(sorters, drawnBags);
+    mechanisms.clear();
+    const px = (metres) => Math.max(geometry.toPixels(metres), 1);
+    for (const sorter of sorters.values()) {
+      const open = flaps.get(sorter.id) ?? new Map();
+      flaps.set(sorter.id, open);
+      for (const { belt, side } of sorter.branches) {
+        if (side === 0) continue;
+        const target = targets.has(sorter.id) ? Number(targets.get(sorter.id) === belt.id) : (open.get(belt.id) ?? 0);
+        const amount = stepFlap(open.get(belt.id) ?? 0, target, dtS);
+        open.set(belt.id, amount);
+        // Pointing upstream along the rail when closed, turning towards the
+        // branch's side as it opens.
+        const hingeX = BELT_WIDTH_M / 2 - 0.07;
+        const hingeY = -side * (BELT_WIDTH_M / 2 - BELT.railM - 0.04);
+        const angle = Math.PI - side * amount * FLAP_OPEN_RAD;
+        const hinge = sorterPoint(sorter, hingeX, hingeY);
+        const tip = sorterPoint(sorter, hingeX + FLAP_LENGTH_M * Math.cos(angle),
+          hingeY + FLAP_LENGTH_M * Math.sin(angle));
+        mechanisms.moveTo(hinge.x, hinge.y).lineTo(tip.x, tip.y)
+          .stroke({ width: px(0.075), color: STEEL_DARK, cap: 'round' });
+        mechanisms.moveTo(hinge.x, hinge.y).lineTo(tip.x, tip.y)
+          .stroke({ width: px(0.045), color: STEEL, cap: 'round' });
+        mechanisms.circle(hinge.x, hinge.y, px(0.065)).fill(STEEL_DARK);
+        mechanisms.circle(hinge.x, hinge.y, px(0.03)).fill(STEEL);
+      }
+      // The photo-eye: a faint beam across the belt while clear (a bag
+      // covering it hides it), the emitter's LED lit while blocked.
+      const { incoming } = sorter;
+      const trim = ends.get(incoming.id).endTrimM;
+      const along = eyeAlong(sorter, trim);
+      const blocked = eyeBlocked(sorter, trim, drawnBags);
+      const centre = pointAlong(incoming, along);
+      const angle = beltAngle(incoming);
+      const at = (across) => geometry.toScreen(frameToMap(centre, angle, 0, across));
+      if (!blocked) {
+        const a = at(-BELT.surfaceM / 2);
+        const b = at(BELT.surfaceM / 2);
+        mechanisms.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: 1, color: EYE_LIT, alpha: 0.22 });
+      }
+      const led = at(EYE.ledAcrossM - 0.04);
+      if (blocked) mechanisms.circle(led.x, led.y, px(0.13)).fill({ color: EYE_LIT, alpha: 0.18 });
+      mechanisms.circle(led.x, led.y, Math.max(px(0.04), 1.5)).fill(blocked ? EYE_LIT : EYE_DARK);
+    }
+  }
+
   // Selects what was picked, or nothing.
   function select(picked) {
     const same = picked?.kind === selection?.kind && picked?.id === selection?.id;
@@ -388,6 +507,23 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   // pulses (displayed simulated time).
   function drawSignals(timeS) {
     signals.clear();
+    for (const [beltId, state] of edges) {
+      const belt = belts.get(beltId);
+      if (!belt) continue;
+      const { onM, offM, widthM } = EDGE_PATTERNS[state];
+      const { from, to } = surfaceSpan(belt, ends.get(beltId));
+      const angle = beltAngle(belt);
+      const width = Math.max(geometry.toPixels(widthM), 2);
+      for (const across of [-1, 1].map((sign) => sign * (BELT_WIDTH_M / 2 - BELT.railM / 2))) {
+        for (const [a, b] of dashes(from, to, onM, offM)) {
+          const start = geometry.toScreen(frameToMap(belt.start, angle, a, across));
+          const end = geometry.toScreen(frameToMap(belt.start, angle, b, across));
+          signals.moveTo(start.x, start.y).lineTo(end.x, end.y)
+            .stroke({ width, color: LIGHT_COLOURS[STATE_OF_EDGE[state]] });
+        }
+      }
+    }
+
     const lit = (nowSeconds() % BLINK_PERIOD_S) < BLINK_PERIOD_S * BLINK_ON;
     const radius = Math.max(geometry.toPixels(LIGHT_RADIUS_M), 3);
     for (const belt of layout.belts) {
@@ -416,6 +552,24 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     }
   }
 
+  // A bag in a prolonged wait: a small amber clock on its rear end, over the
+  // wheels and away from its tag. Inside the belt, never on its edges, so a
+  // waiting bag and a congested belt read differently.
+  function drawBadges() {
+    badges.clear();
+    for (const baggage of drawnBags) {
+      if (!baggage.prolonged_wait) continue;
+      const belt = belts.get(baggage.conveyor_id);
+      if (!belt) continue;
+      const clock = geometry.toScreen(pointAlong(belt, baggage.position_m + 0.13));
+      const r = Math.max(geometry.toPixels(0.1), 3);
+      badges.circle(clock.x, clock.y, r + 1).fill({ color: LIGHT_BACKING, alpha: baggage.alpha });
+      badges.circle(clock.x, clock.y, r).fill({ color: LIGHT_COLOURS.warning, alpha: baggage.alpha });
+      badges.moveTo(clock.x, clock.y - r * 0.62).lineTo(clock.x, clock.y).lineTo(clock.x + r * 0.5, clock.y)
+        .stroke({ width: Math.max(r * 0.22, 1), color: LIGHT_BACKING, alpha: baggage.alpha, cap: 'round', join: 'round' });
+    }
+  }
+
   // Called by the PixiJS ticker before each frame is rendered.
   function update() {
     if (!layout) return;
@@ -425,12 +579,16 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     moveSurfaces(timeS);
     placePassengers(timeS);
     placeBaggage(timeS);
+    drawMechanisms(timeS);
     drawSignals(timeS);
+    drawBadges();
     drawHighlight();
   }
   app.ticker.add(update);
-  // Signs and tags use the interface's typeface: redraw once it has loaded.
-  document.fonts?.load(`700 16px ${CANVAS_FONT}`).then(() => {
+  // Signs and tags use the interface's typeface, the counters B612 Mono:
+  // redraw once they have loaded.
+  Promise.all([`700 16px ${CANVAS_FONT}`, `700 16px ${COUNTER_FONT}`]
+    .map((font) => document.fonts?.load(font))).then(() => {
     geometry = null;
   });
 
@@ -531,6 +689,11 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       layout = newLayout;
       belts = new Map(layout.belts.map((belt) => [belt.id, belt]));
       destinations = destinationLooks(layout.outputs);
+      sorters = sorterBranches(layout);
+      ends = beltEnds(layout);
+      flaps.clear();
+      flapTime = null;
+      edges = new Map();
       desks = layout.inputs.map((input) => ({
         id: input.id, belt: layout.belts.find((belt) => belt.source_id === input.id),
       }));
@@ -563,14 +726,18 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
         surfaceTime = null;
         wrongExits = [];
         queues = new Map();
+        flaps.clear();
+        flapTime = null;
       }
       newest = snapshot;
       queues = addQueueSnapshot(queues, snapshot);
       lights = beltLights(snapshot);
+      edges = beltStates(snapshot);
       wrongExits = addWrongExits(wrongExits, snapshot);
       haltedBelts = new Set(snapshot.belts.filter((belt) => belt.stopped || belt.faulty)
         .map((belt) => belt.id));
       playback.add(snapshot, nowSeconds());
+      updateCounters();
     },
   };
 }

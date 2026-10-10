@@ -14,6 +14,7 @@
 import { Texture } from 'pixi.js';
 import { BELT_WIDTH_M, PLANT_MARGIN_M, beltAngle, beltEnds, plantJoints } from './geometry.js';
 import { LANE, MAX_SHOWN } from './passengers.js';
+import { eyeAlong, sorterBranches } from './sorters.js';
 
 // Shadow offset in metres per metre of height above the floor.
 const LIGHT = { x: 0.35, y: 0.55 };
@@ -354,6 +355,29 @@ function drawChute(ctx) {
     ctx.lineTo(end - 0.05, y * 1.4);
     ctx.stroke();
   }
+  // The mouth where bags drop to the loading area below: dark, deeper at
+  // the far end.
+  const mouth = ctx.createLinearGradient(end - 0.3, 0, end, 0);
+  mouth.addColorStop(0, 'rgba(5, 7, 9, 0)');
+  mouth.addColorStop(1, 'rgba(5, 7, 9, 0.95)');
+  ctx.fillStyle = mouth;
+  ctx.beginPath();
+  ctx.moveTo(end - 0.3, -0.59);
+  ctx.lineTo(end, -0.62);
+  ctx.lineTo(end, 0.62);
+  ctx.lineTo(end - 0.3, 0.59);
+  ctx.closePath();
+  ctx.fill();
+  // Rubber curtain strips hanging across the top of the chute.
+  const curtainX = start + 0.22;
+  ctx.fillStyle = '#1b1f23';
+  ctx.fillRect(curtainX - 0.02, -0.46, 0.04, 0.92);
+  for (let y = -0.42; y < 0.42; y += 0.12) {
+    ctx.fillStyle = 'rgba(32, 37, 42, 0.92)';
+    ctx.fillRect(curtainX, y + 0.008, 0.16, 0.104);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+    ctx.fillRect(curtainX, y + 0.008, 0.16, 0.012);
+  }
 }
 
 // The queue lane beside a desk (desk frame, see passengers.js): a belt
@@ -399,13 +423,27 @@ function drawQueueLane(ctx, scale) {
 
 // Airport wayfinding sign: a code box and a white caption on a dark panel,
 // always upright. (xM, yM) is its top-left corner on the map.
-function signSize(caption) {
+function signSize(caption, counterM = 0) {
   const height = 0.62;
-  return { width: height + 0.16 + caption.length * 0.17, height };
+  return { width: height + 0.16 + caption.length * 0.17 + counterM, height };
 }
 
-function drawSign(ctx, scale, xM, yM, code, caption, codeColour) {
-  const { width, height } = signSize(caption);
+// The deliveries counter at the right end of an output's sign (metres).
+const COUNTER_M = 1.0;
+
+// An output's sign beside its chute: its top-left corner, size and the
+// centre of its counter well, where the renderer writes the deliveries.
+export function outputSign(output, belt) {
+  const corner = fromFrame(output.position, beltAngle(belt), -1.2, -1.9);
+  const { width, height } = signSize(output.label, COUNTER_M);
+  return {
+    ...corner, width, height,
+    counter: { x_m: corner.x_m + width - 0.07 - (COUNTER_M - 0.07) / 2, y_m: corner.y_m + height / 2 },
+  };
+}
+
+function drawSign(ctx, scale, xM, yM, code, caption, codeColour, counterM = 0) {
+  const { width, height } = signSize(caption, counterM);
   ctx.save();
   castShadow(ctx, scale, 1.2, 0.5);
   ctx.fillStyle = '#0b0f13';
@@ -422,6 +460,16 @@ function drawSign(ctx, scale, xM, yM, code, caption, codeColour) {
   ctx.fill();
   text(ctx, scale, code, xM + height / 2, yM + height / 2 + 0.01, 0.36, { colour: '#0b0f13', weight: 700, align: 'center' });
   text(ctx, scale, caption, xM + height + 0.06, yM + height / 2 + 0.01, 0.3, { colour: '#f4f6f8', weight: 600 });
+  if (counterM > 0) {
+    // A recessed display for the count, lit from within.
+    ctx.fillStyle = '#05080a';
+    ctx.beginPath();
+    ctx.roundRect(xM + width - counterM, yM + 0.07, counterM - 0.07, height - 0.14, 0.04);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 0.012;
+    ctx.stroke();
+  }
 }
 
 // A point given in a belt-aligned frame (origin, angle), as a map point.
@@ -483,9 +531,9 @@ export function floorCanvas({ geometry, layout, screenWidth, screenHeight, resol
     drawSign(ctx, scale, corner.x_m, corner.y_m, inputCodes.get(input.id), caption, '#e8eef3');
   }
   for (const output of layout.outputs) {
-    const corner = fromFrame(output.position, beltAngle(lastBelt.get(output.id)), -1.2, -1.9);
+    const sign = outputSign(output, lastBelt.get(output.id));
     const { code, colour } = destinations.get(output.id);
-    drawSign(ctx, scale, corner.x_m, corner.y_m, code, output.label, colour);
+    drawSign(ctx, scale, sign.x_m, sign.y_m, code, output.label, colour, COUNTER_M);
   }
   return canvas;
 }
@@ -587,8 +635,28 @@ function drawJoint(ctx, random, joint) {
   });
 }
 
+// Where a sorter's photo-eye sits across the belt entering it, in that
+// belt's frame: the emitter on the left rail (its LED, lit by the renderer,
+// at EYE.led), a reflector on the right one.
+export const EYE = { ledAcrossM: -BELT_WIDTH_M / 2 + 0.01 };
+
+function drawEyeHousings(ctx, scale, along) {
+  for (const [y, height] of [[-BELT_WIDTH_M / 2 - 0.07, 0.15], [BELT_WIDTH_M / 2 - 0.08, 0.15]]) {
+    ctx.save();
+    castShadow(ctx, scale, 0.25, 0.5);
+    ctx.fillStyle = '#20252a';
+    ctx.beginPath();
+    ctx.roundRect(along - 0.08, y, 0.16, height, 0.025);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+    ctx.lineWidth = 0.01;
+    ctx.stroke();
+  }
+}
+
 export function frameCanvas({ geometry, layout, screenWidth, screenHeight, resolution }) {
-  const { canvas, ctx } = sceneCanvas(geometry, screenWidth, screenHeight, resolution);
+  const { canvas, ctx, scale } = sceneCanvas(geometry, screenWidth, screenHeight, resolution);
   const random = seededRandom(11);
   const ends = beltEnds(layout);
   for (const belt of layout.belts) {
@@ -603,6 +671,10 @@ export function frameCanvas({ geometry, layout, screenWidth, screenHeight, resol
     });
   }
   for (const joint of plantJoints(layout)) drawJoint(ctx, random, joint);
+  for (const sorter of sorterBranches(layout).values()) {
+    const along = eyeAlong(sorter, ends.get(sorter.incoming.id).endTrimM);
+    inFrame(ctx, sorter.incoming.start, beltAngle(sorter.incoming), () => drawEyeHousings(ctx, scale, along));
+  }
   return canvas;
 }
 

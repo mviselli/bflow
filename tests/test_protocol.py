@@ -214,12 +214,17 @@ def test_snapshot_stats_are_the_engine_stats():
     stats = engine.stats()
     assert stats.throughput > 0  # a non-trivial value to compare
     sent = snapshot_message(engine, running=True).stats.model_dump()
-    lists = {"belts", "inputs"}
+    lists = {"belts", "inputs", "outputs"}
     expected = {name: getattr(stats, name) for name in StatsState.model_fields if name not in lists}
     assert {name: value for name, value in sent.items() if name not in lists} == expected
     assert sent["inputs"] == [
         {"input_id": node.input_id, "generated": node.generated, "waiting": node.waiting}
         for node in stats.inputs]
+    assert stats.correctly_delivered > 0
+    assert sent["outputs"] == [
+        {"output_id": node.output_id, "correctly_delivered": node.correctly_delivered,
+         "misdelivered": node.misdelivered}
+        for node in stats.outputs]
     assert sent["belts"] == [
         {"belt_id": belt.belt_id, "bags": belt.bags, "capacity": belt.capacity,
          "occupancy": belt.occupancy}

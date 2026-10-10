@@ -354,6 +354,13 @@ input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
 .legend-list { margin: 0; padding: 0; list-style: none; }
 .legend-list li { display: flex; align-items: flex-start; gap: 12px; padding: 7px 0; font-size: 14px; color: var(--muted); }
 .legend-list li .glyph { margin-top: 3px; }
+/* A belt's edge pattern (renderer.js EDGE_PATTERNS) and a waiting bag's clock. */
+.edge { flex: none; width: 14px; height: 4px; margin-top: 8px; border-radius: 1px; }
+.edge[data-state="stopped"] { background: var(--stop); }
+.edge[data-state="congested"] { background: repeating-linear-gradient(90deg, var(--warn) 0 6px, transparent 6px 8px); }
+.edge[data-state="fault"] { height: 5px; background: repeating-linear-gradient(90deg, var(--fault) 0 2px, transparent 2px 4px); }
+.wait-clock { position: relative; flex: none; width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; background: var(--warn); }
+.wait-clock::before { content: ''; position: absolute; left: 6px; top: 3px; width: 4px; height: 4px; border-left: 2px solid var(--on-light); border-bottom: 2px solid var(--on-light); }
 .legend-list b { display: block; color: var(--text); font-weight: 600; }
 .legend-list.keys li { align-items: center; }
 kbd {
