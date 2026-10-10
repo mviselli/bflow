@@ -71,6 +71,7 @@ class PlantChecker:
                                             if conveyor.config.source_id == merge_id)
                              for merge_id in engine.merge_inputs}
         self.last_admitted = {input_id: 0 for input_id in engine.waiting}
+        self.admitted_count = {input_id: 0 for input_id in engine.waiting}
         # Wrong output of every bag missorted so far, and the wrong exits seen.
         self.missorted = {}
         self.wrong_exits = 0
@@ -308,7 +309,11 @@ class PlantChecker:
             assert rear.position_m + rear.length_m + gap <= front.position_m + EPSILON
 
     def check_queues(self, entered):
-        """Each input admits its oldest bag, and nobody waits while its belt has space."""
+        """Each input admits its oldest bag, and nobody waits while its belt has space.
+
+        The input's waiting bags are its last generated ones (the page numbers
+        the passengers in its queue from generated − waiting).
+        """
         engine = self.engine
         for input_id, queue in engine.waiting.items():
             conveyor = engine.input_conveyors[input_id]
@@ -316,6 +321,8 @@ class PlantChecker:
                 if previous is None:
                     assert number(bag) > self.last_admitted[input_id]
                     self.last_admitted[input_id] = number(bag)
+                    self.admitted_count[input_id] += 1
+            assert engine.generated_by_input[input_id] - len(queue) == self.admitted_count[input_id]
             if queue:
                 assert number(queue[0]) > self.last_admitted[input_id]
                 assert not engine._has_entry_space(conveyor, queue[0])

@@ -188,7 +188,7 @@ class Engine:
             throughput=self.throughput,
             belts=tuple(BeltStats(belt_id, len(conveyor.baggage), self.belt_capacities[belt_id])
                         for belt_id, conveyor in self.conveyors.items()),
-            inputs=tuple(InputStats(input_id, len(queue))
+            inputs=tuple(InputStats(input_id, self.generated_by_input[input_id], len(queue))
                          for input_id, queue in self.waiting.items()),
             outputs=tuple(OutputStats(output_id, self.correctly_delivered_by_output[output_id],
                                       self.misdelivered_by_output[output_id])

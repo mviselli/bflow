@@ -1,8 +1,9 @@
 // Draws the plant with PixiJS from the server's layout and snapshots.
 //
-// Layers, bottom to top: the floor (tiles, direction arrows, desks, chutes,
-// signs, shadows), the belt surfaces, the belt frames (rails, drums and the
-// transfer plates where belts meet) and the bags. The textures come from
+// Layers, bottom to top: the floor (tiles, direction arrows, desks and their
+// queue lanes, chutes, signs, shadows), the belt surfaces, the belt frames
+// (rails, drums and the transfer plates where belts meet), the passengers
+// queueing at the desks (passengers.js decides where) and the bags. The textures come from
 // assets.js and are rebuilt when the layout or the screen size changes.
 // Every position goes through geometry.js.
 //
@@ -29,9 +30,10 @@
 // a camera move: the textures already drawn are scaled at once and redrawn
 // sharp once the size stays still, so the map follows the panel smoothly.
 
-import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
+import { Container, Graphics, Sprite, Text, TilingSprite } from 'pixi.js';
 import {
-  BELT, CANVAS_FONT, beltSurfaceCanvas, floorCanvas, frameCanvas, suitcaseCanvas, surfaceSpan, toTexture,
+  BELT, CANVAS_FONT, PASSENGER_ANCHOR, beltSurfaceCanvas, floorCanvas, frameCanvas, passengerCanvas,
+  suitcaseCanvas, surfaceSpan, toTexture,
 } from './assets.js';
 import {
   BAGGAGE_WIDTH_M, BELT_WIDTH_M, DESK_SPAN, FIT_CAMERA, baggagePlacement, beltAngle, beltEnds,
@@ -39,6 +41,9 @@ import {
   pickAt, plantGeometry, pointAlong, samePlant, zoomAround,
 } from './geometry.js';
 import { destinationLooks, hashString, shortCode, suitcaseLook } from './looks.js';
+import {
+  LANE, MAX_SHOWN, addQueueSnapshot, deskToMap, passengerLook, passengersAt, queuePoint,
+} from './passengers.js';
 import { advanceSurface, createPlayback, isNewRun } from './playback.js';
 import { addWrongExits, beltLights, wrongExitSignals } from './signals.js';
 
@@ -65,6 +70,8 @@ const LIGHT_ASIDE_M = BELT_WIDTH_M / 2 + 0.3;
 const BLINK_PERIOD_S = 0.8;
 const BLINK_ON = 0.6;
 const WRONG_EXIT_COLOUR = 0xf0524f;
+// Passenger textures are drawn for this many facings, a full turn.
+const PASSENGER_FACINGS = 32;
 
 // Outline of a rectangle along a belt: from `from` to `to` metres along it,
 // `widthM` wide, in screen pixels of `geometry`.
@@ -108,8 +115,9 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   const frame = new Sprite();
   const signals = new Graphics();
   const highlight = new Graphics();
+  const people = new Container();
   const bagLayer = new Container();
-  world.addChild(floor, surfaceLayer, frame, signals, highlight, bagLayer);
+  world.addChild(floor, surfaceLayer, frame, people, signals, highlight, bagLayer);
   app.stage.addChild(world);
 
   let layout = null;
@@ -126,6 +134,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   let newest = null;              // the newest snapshot
   let lights = new Map();         // belt id → { state, blinking }, from the newest snapshot
   let wrongExits = [];            // recent wrong arrivals, { outputId, timeS }
+  let queues = new Map();         // input id → its queue, from the snapshots (passengers.js)
   const surfaceOffsets = new Map(); // belt id → offset of its surface in metres
   let surfaceTime = null;         // simulated time the surfaces were last moved to
   let resolution = 1;
@@ -133,6 +142,9 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   const surfaces = new Map();     // belt id → TilingSprite of its moving surface
   const bagSprites = new Map();   // bag id → sprite on screen
   const bagTextures = new Map();  // look and angle → texture shared by bags that look alike
+  const passengerSprites = new Map();   // "input id#number" → sprite on screen
+  const passengerTextures = new Map();  // look and facing → texture
+  const queueBadges = new Map();        // input id → "+N" text beyond the last passenger drawn
 
   function sceneTexture(canvas) {
     const texture = toTexture(canvas);
@@ -145,6 +157,12 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     bagSprites.clear();
     for (const texture of bagTextures.values()) texture.destroy(true);
     bagTextures.clear();
+    for (const sprite of passengerSprites.values()) sprite.destroy();
+    passengerSprites.clear();
+    for (const texture of passengerTextures.values()) texture.destroy(true);
+    passengerTextures.clear();
+    for (const badge of queueBadges.values()) badge.destroy();
+    queueBadges.clear();
   }
 
   // Redraws every texture for the current layout and screen size.
@@ -257,6 +275,73 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     }
   }
 
+  function passengerTexture(look, angle) {
+    const step = (2 * Math.PI) / PASSENGER_FACINGS;
+    const facing = ((Math.round(angle / step) % PASSENGER_FACINGS) + PASSENGER_FACINGS) % PASSENGER_FACINGS;
+    const key = `${look.coat}|${look.hair}|${look.skin}|${facing}`;
+    if (!passengerTextures.has(key)) {
+      passengerTextures.set(key, toTexture(passengerCanvas({
+        ...look, angle: facing * step, scale: geometry.pixelsPerMetre * resolution,
+      })));
+    }
+    return passengerTextures.get(key);
+  }
+
+  // The passengers in each desk's line at the displayed time, and a "+N"
+  // badge past the last one when more wait than are drawn.
+  function placePassengers(timeS) {
+    const present = new Set();
+    for (const { id, belt } of desks) {
+      const queue = queues.get(id);
+      if (!queue || !belt) continue;
+      const input = layout.inputs.find((node) => node.id === id);
+      const angle = beltAngle(belt);
+      const { passengers, extra } = passengersAt(queue, timeS);
+      for (const { number, slot, alpha } of passengers) {
+        const key = `${id}#${number}`;
+        const point = queuePoint(slot);
+        const screen = geometry.toScreen(deskToMap(input.position, angle, point));
+        let sprite = passengerSprites.get(key);
+        if (!sprite) {
+          sprite = new Sprite();
+          sprite.anchor.set(PASSENGER_ANCHOR.x, PASSENGER_ANCHOR.y);
+          sprite.scale.set(1 / resolution);
+          passengerSprites.set(key, sprite);
+          people.addChild(sprite);
+        }
+        sprite.texture = passengerTexture(passengerLook(id, number), angle + point.facing);
+        sprite.position.set(screen.x, screen.y);
+        sprite.alpha = alpha;
+        present.add(key);
+      }
+      let badge = queueBadges.get(id);
+      if (extra > 0) {
+        if (!badge) {
+          badge = new Text({ text: '', style: {
+            fontFamily: CANVAS_FONT, fontWeight: '700', fill: 0xe8eef3,
+            fontSize: Math.max(geometry.toPixels(0.32), 9),
+          } });
+          badge.anchor.set(0.5);
+          queueBadges.set(id, badge);
+          people.addChild(badge);
+        }
+        const place = { x: LANE.fromM + LANE.pitchM * (MAX_SHOWN - 1) + 0.15, y: LANE.y };
+        const screen = geometry.toScreen(deskToMap(input.position, angle, place));
+        badge.text = `+${extra}`;
+        badge.position.set(screen.x, screen.y);
+      } else if (badge) {
+        badge.destroy();
+        queueBadges.delete(id);
+      }
+    }
+    for (const [key, sprite] of passengerSprites) {
+      if (!present.has(key)) {
+        sprite.destroy();
+        passengerSprites.delete(key);
+      }
+    }
+  }
+
   // Selects what was picked, or nothing.
   function select(picked) {
     const same = picked?.kind === selection?.kind && picked?.id === selection?.id;
@@ -338,6 +423,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     const timeS = playback.advance(nowSeconds());
     if (timeS === null) return;
     moveSurfaces(timeS);
+    placePassengers(timeS);
     placeBaggage(timeS);
     drawSignals(timeS);
     drawHighlight();
@@ -454,6 +540,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       newest = null;
       lights = new Map();
       wrongExits = [];
+      queues = new Map();
       if (!keep) camera = FIT_CAMERA;
       geometry = null;
       drawnBags = [];
@@ -475,8 +562,10 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
         surfaceOffsets.clear();
         surfaceTime = null;
         wrongExits = [];
+        queues = new Map();
       }
       newest = snapshot;
+      queues = addQueueSnapshot(queues, snapshot);
       lights = beltLights(snapshot);
       wrongExits = addWrongExits(wrongExits, snapshot);
       haltedBelts = new Set(snapshot.belts.filter((belt) => belt.stopped || belt.faulty)

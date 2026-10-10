@@ -34,6 +34,7 @@ def place(engine, conveyor_id, name, destination_id, position):
     engine.conveyors[conveyor_id].baggage.insert(0, bag)
     engine.admitted_count += 1  # keeps the counters consistent for stats()
     engine.generated_count += 1
+    engine.generated_by_input[engine.layout.inputs[0].id] += 1  # counted at the first input
     return bag
 
 

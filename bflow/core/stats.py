@@ -23,9 +23,15 @@ class BeltStats:
 
 @dataclass(frozen=True)
 class InputStats:
-    """Bags generated at one input and still waiting to be admitted."""
+    """Bags generated at one input since the start, and those still waiting to be admitted.
+
+    The queue is first in, first out: the waiting bags are the input's last
+    ``waiting`` generated ones, numbers ``generated - waiting + 1`` to
+    ``generated`` (the page draws their passengers from this).
+    """
 
     input_id: str
+    generated: int
     waiting: int
 
 
@@ -88,6 +94,7 @@ class Stats:
         return (
             self.generated == self.admitted + self.waiting
             and self.admitted == self.correctly_delivered + self.misdelivered + self.in_transit
+            and self.generated == sum(node.generated for node in self.inputs)
             and self.waiting == sum(node.waiting for node in self.inputs)
             and self.in_transit == sum(belt.bags for belt in self.belts)
             and self.correctly_delivered == sum(node.correctly_delivered for node in self.outputs)

@@ -48,7 +48,8 @@ drawn yet, or one that is still fading out at its chute.
 - [ ] The map shows the whole plant: two islands of three check-in desks
       (signs A1–A3 at the top, B1–B3 at the bottom), their belts joining at
       the merges, the sort line with three sorters and four chutes with
-      the signs BF 101, BF 205, BF 312 and BF 418. No bags.
+      the signs BF 101, BF 205, BF 312 and BF 418. No bags. Beside each
+      desk an empty queue lane, with no passengers.
 - [ ] The page fills the window with no page scroll. The top bar reads
       **Start**, **Reset**, **1×** (pressed), **2×**, **5×**, `00:00.00`,
       `tick 0` and **Live**; no banner over the map.
@@ -189,9 +190,16 @@ with belts already full the queue grows faster and takes longer to clear).
 - [ ] At about `01:10` A1 has about 21 bags waiting: its **Waiting** row
       and the **Waiting** indicator show the same number (the other desks
       stay at 0).
+- [ ] A1's lane holds passengers: one beside the weighing plate and six in
+      the lane, with a **+N** badge where N is the waiting count minus 7.
+      Each time a bag leaves A1, the passenger at the plate walks off and
+      the line steps forward; the other desks have no passengers. Pause:
+      the passengers stop mid-step, if they were moving.
 - [ ] On the **Controls** page (Desks), A1's slider reads the same rate and
       its queue the same number. Drag A1's slider there to `0`: no new bag
       appears at A1 and its queue empties in about 50 simulated seconds.
+      The badge counts down to nothing, then the passengers leave one by
+      one until the lane is empty.
 
 ## 8. Reset
 

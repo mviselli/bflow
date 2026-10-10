@@ -13,6 +13,7 @@
 
 import { Texture } from 'pixi.js';
 import { BELT_WIDTH_M, PLANT_MARGIN_M, beltAngle, beltEnds, plantJoints } from './geometry.js';
+import { LANE, MAX_SHOWN } from './passengers.js';
 
 // Shadow offset in metres per metre of height above the floor.
 const LIGHT = { x: 0.35, y: 0.55 };
@@ -355,6 +356,47 @@ function drawChute(ctx) {
   }
 }
 
+// The queue lane beside a desk (desk frame, see passengers.js): a belt
+// barrier on posts on each side, open at the desk end.
+function drawQueueLane(ctx, scale) {
+  const from = LANE.fromM - 0.35;
+  const to = LANE.fromM + LANE.pitchM * (MAX_SHOWN - 2) + 0.35;
+  const sides = [LANE.y - LANE.halfWidthM, LANE.y + LANE.halfWidthM];
+  ctx.save();
+  castShadow(ctx, scale, 0.9, 0.4);
+  ctx.strokeStyle = '#6c757d';
+  ctx.lineWidth = 0.045;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (const y of sides) {
+    ctx.moveTo(from, y);
+    ctx.lineTo(to, y);
+  }
+  // Closed at the far end.
+  ctx.moveTo(to, sides[0]);
+  ctx.lineTo(to, sides[1]);
+  ctx.stroke();
+  ctx.restore();
+  // Steel posts.
+  const posts = Math.max(2, Math.round((to - from) / 1.6) + 1);
+  for (const y of sides) {
+    for (let i = 0; i < posts; i += 1) {
+      const x = from + ((to - from) * i) / (posts - 1);
+      ctx.save();
+      castShadow(ctx, scale, 1.0, 0.45);
+      ctx.fillStyle = '#9aa4ac';
+      ctx.beginPath();
+      ctx.arc(x, y, 0.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#d7dde1';
+      ctx.beginPath();
+      ctx.arc(x - 0.012, y - 0.012, 0.025, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
 // Airport wayfinding sign: a code box and a white caption on a dark panel,
 // always upright. (xM, yM) is its top-left corner on the map.
 function signSize(caption) {
@@ -423,7 +465,10 @@ export function floorCanvas({ geometry, layout, screenWidth, screenHeight, resol
   for (const belt of layout.belts) drawDirectionArrows(ctx, belt);
   drawBeltShadows(ctx, scale, layout, ends, joints);
   for (const input of layout.inputs) {
-    inFrame(ctx, input.position, beltAngle(firstBelt.get(input.id)), () => drawCheckInDesk(ctx, scale));
+    inFrame(ctx, input.position, beltAngle(firstBelt.get(input.id)), () => {
+      drawQueueLane(ctx, scale);
+      drawCheckInDesk(ctx, scale);
+    });
   }
   for (const output of layout.outputs) {
     inFrame(ctx, output.position, beltAngle(lastBelt.get(output.id)), () => drawChute(ctx));
@@ -712,5 +757,58 @@ export function suitcaseCanvas({ style, colour, label, tagColour, lengthM, width
   ctx.stroke();
 
   drawTag(ctx, scale, lengthM, widthM, label, tagColour);
+  return canvas;
+}
+
+// --- Passengers ------------------------------------------------------------
+//
+// A passenger seen from above, facing +x turned by `angle`: shoulders and a
+// head, the face forward and the hair at the back. The shadow is shortened
+// (as if the light were higher) so it does not cover the next passenger.
+
+export const PASSENGER_SIZE_M = 1.1;   // the canvas's side, the blurred shadow included
+// The passenger's centre in its canvas, as a share of its side (the shadow
+// takes more room down-right).
+export const PASSENGER_ANCHOR = { x: 0.42 / PASSENGER_SIZE_M, y: 0.4 / PASSENGER_SIZE_M };
+
+export function passengerCanvas({ coat, hair, skin, angle, scale }) {
+  const { canvas, ctx } = metreCanvas(PASSENGER_SIZE_M, PASSENGER_SIZE_M, scale);
+  ctx.translate(PASSENGER_ANCHOR.x * PASSENGER_SIZE_M, PASSENGER_ANCHOR.y * PASSENGER_SIZE_M);
+  ctx.rotate(angle);
+
+  // Shoulders, with the standing figure's shadow.
+  ctx.save();
+  castShadow(ctx, scale, 0.45, 0.5);
+  ctx.fillStyle = coat;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 0.13, 0.23, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  const cloth = ctx.createLinearGradient(-0.13, -0.23, 0.13, 0.23);
+  cloth.addColorStop(0, shade(coat, 0.25));
+  cloth.addColorStop(1, shade(coat, -0.3));
+  ctx.fillStyle = cloth;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 0.13, 0.23, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = shade(coat, -0.5);
+  ctx.lineWidth = 0.012;
+  ctx.stroke();
+  // Head: the face towards +x, hair over the back.
+  ctx.save();
+  castShadow(ctx, scale, 0.15, 0.4);
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(0.02, 0, 0.095, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = hair;
+  ctx.beginPath();
+  ctx.arc(-0.005, 0, 0.088, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+  ctx.beginPath();
+  ctx.arc(-0.03, -0.03, 0.035, 0, Math.PI * 2);
+  ctx.fill();
   return canvas;
 }

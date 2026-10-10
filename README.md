@@ -53,6 +53,9 @@ map to zoom, drag to move the view and use the buttons in its corner to zoom
 or see the whole plant again. Click a bag, a belt or a check-in desk to see
 its details on the **Details** page (a belt's state and occupancy, a bag's
 destination, position and travel time, a desk's queue and arrival rate).
+Passengers queue in a lane beside a desk while their bags wait for room on
+its belt: one passenger per waiting bag, the first leaving as soon as their
+bag is taken.
 From there you can stop and restart a belt, simulate a fault on it and repair
 it, or change how many bags arrive at a desk. `Esc` clears the selection.
 

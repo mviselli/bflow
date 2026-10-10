@@ -17,8 +17,9 @@ export const BAGGAGE_WIDTH_M = 0.45;
 // Used to pick and outline a desk; assets.js draws it inside this area.
 export const DESK_SPAN = { fromM: -1.6, toM: 0, widthM: 2.2 };
 // Floor shown around the plant, in metres: room for the check-in desks, the
-// output chutes and the signs behind the desks.
-export const PLANT_MARGIN_M = 2.5;
+// queue lane beside an outer desk, the output chutes and the signs behind
+// the desks.
+export const PLANT_MARGIN_M = 3;
 
 // Smallest rectangle holding every node and belt end of the layout.
 export function plantBounds(layout) {

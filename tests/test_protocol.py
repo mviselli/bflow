@@ -217,8 +217,9 @@ def test_snapshot_stats_are_the_engine_stats():
     lists = {"belts", "inputs"}
     expected = {name: getattr(stats, name) for name in StatsState.model_fields if name not in lists}
     assert {name: value for name, value in sent.items() if name not in lists} == expected
-    assert sent["inputs"] == [{"input_id": node.input_id, "waiting": node.waiting}
-                              for node in stats.inputs]
+    assert sent["inputs"] == [
+        {"input_id": node.input_id, "generated": node.generated, "waiting": node.waiting}
+        for node in stats.inputs]
     assert sent["belts"] == [
         {"belt_id": belt.belt_id, "bags": belt.bags, "capacity": belt.capacity,
          "occupancy": belt.occupancy}

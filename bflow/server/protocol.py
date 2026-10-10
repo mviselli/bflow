@@ -152,9 +152,10 @@ class BeltStatsState(Message):
 
 
 class InputStatsState(Message):
-    """Bags generated at one input and still waiting to be admitted."""
+    """Bags generated at one input since the start, and those still waiting to be admitted."""
 
     input_id: str = Field(min_length=1)
+    generated: int = Field(ge=0)
     waiting: int = Field(ge=0)
 
 
