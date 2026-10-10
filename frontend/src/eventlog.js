@@ -1,6 +1,6 @@
-// Event log under the open alarms: the engine's events, newest first, with
-// simulated time, severity, the element or bag involved and the message,
-// and a filter by severity.
+// Event log page of the side panel: the engine's events, newest first,
+// with simulated time, severity, the element or bag involved and the
+// message, and a filter by severity.
 //
 // The events arrive with the snapshots: each connection sends every event
 // once, by id, and a new connection resends the ones the engine retained.

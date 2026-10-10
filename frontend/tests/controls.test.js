@@ -1,7 +1,7 @@
 // Start/pause button and time format of the top bar.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatTime, indicators, toggleState } from '../src/controls.js';
+import { INDICATOR_GROUPS, KEY_INDICATORS, formatTime, indicators, toggleState } from '../src/controls.js';
 
 function snapshot(run, tick, running) {
   return { run, tick, running };
@@ -64,4 +64,12 @@ test('wrong exits and active alarms call for attention only above zero, past occ
   assert.deepEqual(alerts({}), { misdelivered: 'warning', active_errors: 'error', active_warnings: 'warning' });
   // Everything repaired and cleared: the occurrences stay, highlighted no more.
   assert.deepEqual(alerts({ misdelivered: 0, active_errors: 0, active_warnings: 0, waiting: 9 }), {});
+});
+
+test('the strip under the map shows engine indicators only, each opening an existing page', () => {
+  const keys = INDICATOR_GROUPS.flatMap((group) => group.items.map(([key]) => key));
+  assert.ok(KEY_INDICATORS.every(([key, page]) => keys.includes(key) && ['stats', 'alarms'].includes(page)));
+  // Every indicator that can call for attention is in view.
+  const alerting = indicators(stats()).filter((item) => item.alert).map((item) => item.key);
+  assert.ok(alerting.every((key) => KEY_INDICATORS.some(([shown]) => shown === key)));
 });

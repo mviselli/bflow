@@ -49,31 +49,37 @@ drawn yet, or one that is still fading out at its chute.
       (signs A1–A3 at the top, B1–B3 at the bottom), their belts joining at
       the merges, the sort line with three sorters and four chutes with
       the signs BF 101, BF 205, BF 312 and BF 418. No bags.
-- [ ] The toolbar reads **Start**, **Reset**, **1×** (pressed), **2×**,
-      **5×**, `00:00.00 · tick 0` and **Connected**; no banner over the map.
-- [ ] The side panel reads **Plant** with the selection hint, Wrong sorting
-      `0 % of sorter passages`, Forced error **None**, Open alarms
-      `0 errors · 0 warnings`, Sorters `3`, a wrong sorting probability
-      slider at `0 %` and a **Force a wrong sorting** button.
-- [ ] Under the map, three groups of indicators: **Bag flow**
-      (Generated, Waiting, Admitted, In transit), **Deliveries** (Delivered,
-      Wrong exits, Throughput, Mean travel time) and **Alarms** (Active
-      errors, Active warnings, Errors, Warnings). Every value is `0` and the
-      mean travel time is `—`.
-- [ ] Hovering over an indicator shows its definition.
-- [ ] Below them, **Open alarms** reads **None open** (Acknowledge all
-      disabled) and the **Event log** reads **No events yet**, with three
-      severity buttons (Errors 0, Warnings 0, Info 0) all pressed.
-- [ ] Every belt has a steady green light beside it, near its start.
+- [ ] The page fills the window with no page scroll. The top bar reads
+      **Start**, **Reset**, **1×** (pressed), **2×**, **5×**, `00:00.00`,
+      `tick 0` and **Live**; no banner over the map.
+- [ ] The rail on the left lists Details, Alarms, Events, Controls,
+      Indicators and Legend, with no badge on Alarms. The **Details** page
+      (open on a first visit) reads **Plant** with the selection hint, Wrong
+      sorting `0 % of sorter passages`, Forced error **None**, Open alarms
+      `0 errors · 0 warnings`, Sorters `3`.
+- [ ] The strip under the map shows Waiting, In transit, Delivered, Wrong
+      exits, Throughput, Active errors and Active warnings, all `0`, none
+      highlighted.
+- [ ] The **Indicators** page shows three groups: **Bag flow** (Generated,
+      Waiting, Admitted, In transit), **Deliveries** (Delivered, Wrong
+      exits, Throughput, Mean travel time) and **Alarms** (Active errors,
+      Active warnings, Errors, Warnings). Every value is `0` and the mean
+      travel time is `—`. Hovering over an indicator (here or in the strip)
+      shows its definition.
+- [ ] The **Alarms** page reads **None open** (Acknowledge all disabled)
+      with an empty-state note; the **Events** page reads **No events
+      yet**, with three severity buttons (Errors 0, Warnings 0, Info 0) all
+      pressed.
+- [ ] Every belt has a small steady grey dot beside it, near its start.
 - [ ] The belt surfaces do not move. The console shows no errors.
 
 ## 2. Start, pause and resume at 1×
 
 - [ ] Click **Start**: the button changes to **Pause** and the time counts
       about one simulated second per real second. The tick is always 20 ×
-      the seconds shown (e.g. `00:10.00 · tick 200`), and the toolbar does
-      not move while the numbers grow.
-- [ ] Belt surfaces scroll in the direction of the yellow chevrons.
+      the seconds shown (e.g. `00:10.00` and `tick 200`), and the top bar
+      does not move while the numbers grow.
+- [ ] Belt surfaces scroll in the direction of the pale floor chevrons.
 - [ ] At `00:06.70` one bag appears at each of the six desks.
 - [ ] Bags move smoothly and never overlap; at a corner, merge or sorter
       they slide across the plate and turn instead of jumping. Each bag
@@ -103,9 +109,10 @@ Pause near each time and compare (the counter rules must hold exactly):
 - [ ] The values match the table (or are close to it, for a later tick).
 - [ ] After `01:00` **Throughput** is lower than **Delivered** (it counts
       only the last 60 simulated seconds).
-- [ ] **Wrong exits**, the four alarm indicators, Open alarms and the Event
-      log stay at `0` / empty (with nothing stopped, faulty or missorted, the
-      plant below capacity never warns), and every light stays green.
+- [ ] **Wrong exits**, the four alarm indicators, the Alarms page and the
+      Events page stay at `0` / empty (with nothing stopped, faulty or
+      missorted, the plant below capacity never warns), and every light stays
+      a grey dot.
 - [ ] The number of bags drawn on the map matches **In transit** (allowing
       for the 0.15 s lag).
 
@@ -123,20 +130,22 @@ Pause near each time and compare (the counter rules must hold exactly):
 
 - [ ] Scroll over the map: it zooms around the pointer and the page does not
       scroll; after a moment the textures are sharp again. **+** and **−**
-      zoom around the centre.
+      zoom around the centre (buttons in the map's bottom-right corner).
 - [ ] Drag the map: the view moves, without selecting anything. At the
-      fitted view there is nothing to drag. **Fit** shows the whole plant.
-- [ ] Click a bag: it gets a yellow outline and the panel shows
+      fitted view there is nothing to drag. The corner-arrows button shows
+      the whole plant.
+- [ ] With another page open (e.g. Legend), click a bag: the side panel
+      switches to **Details**. The bag gets a white outline and the page shows
       **Bag bag-…** with its destination tag, Destination, On belt,
       Position (`x m of y m`), Admitted at and a Travel time that grows.
-      The outline and the panel follow it from belt to belt.
-- [ ] When that bag reaches its chute, the outline disappears and the panel
+      The outline and the page follow it from belt to belt.
+- [ ] When that bag reaches its chute, the outline disappears and the page
       goes back to **Plant**.
-- [ ] Click a belt (e.g. `line-1`): it is outlined and the panel shows
+- [ ] Click a belt (e.g. `line-1`): it is outlined and the page shows
       **Belt line-1**: State **Running**, Bags `n of capacity`, Occupancy
       with its bar, Length, Speed, From, To, Congestion **None**, Alarms
       **None**, and the **Stop belt** and **Simulate a fault** buttons.
-- [ ] Click a check-in desk (e.g. A1): it is outlined and the panel shows
+- [ ] Click a check-in desk (e.g. A1): it is outlined and the page shows
       **Check-in A1**: Waiting, Arrival rate `0.15 bags/s · 9 per min`,
       Feeds belt, and a rate slider.
 - [ ] `Esc` clears the selection.
@@ -145,8 +154,8 @@ Pause near each time and compare (the counter rules must hold exactly):
 
 - [ ] At about `00:30`, select `branch-2` and click **Stop belt**: State
       becomes **Stopped by the operator**, the button becomes **Restart
-      belt**, the branch's surface stops and its light turns grey. The rest
-      of the plant keeps moving. The Event log shows an info line **Belt
+      belt**, the branch's surface stops and its light becomes a blue square.
+      The rest of the plant keeps moving. The Events page shows an info line **Belt
       stopped by the operator** for Belt branch-2 (a stop is information, not
       a fault).
 - [ ] Bags going to BF 205 wait at the second sorter and the line backs up:
@@ -154,10 +163,12 @@ Pause near each time and compare (the counter rules must hold exactly):
       `01:00`), the island belts fill up and from about `01:27` bags wait at
       the desks (**Waiting** above 0).
 - [ ] The backed-up belts warn: the first congestion at about `00:52`, the
-      first bags held still for 30 s at `01:00`. Their lights turn amber and
-      blink, **Active warnings** is highlighted and the warnings are listed
-      under Open alarms. The stopped branch's light stays grey until a bag
-      waits on it for 30 s, then turns amber too.
+      first bags held still for 30 s at `01:00`. Their lights become amber
+      triangles and blink, **Active warnings** is highlighted in the strip,
+      the Alarms rail button shows an amber badge and the warnings are listed
+      on the Alarms page under Congestion and Prolonged waits. The stopped
+      branch's blue square stays until a bag waits on it for 30 s, then it
+      turns into an amber triangle too.
 - [ ] At about `01:30`, click **Restart belt**: the branch moves again,
       deliveries resume and **Waiting** goes back to `0` within about 10
       simulated seconds (with a stop a few ticks after `00:30`, short queues
@@ -173,13 +184,14 @@ Click **Reset**, then **Start** at 1× (the values below are for a fresh run;
 with belts already full the queue grows faster and takes longer to clear).
 
 - [ ] At about `00:10`, select desk A1, drag the slider to `1.00` and
-      release: the panel shows `1.00 bags/s · 60 per min` and bags leave A1
+      release: the Details page shows `1.00 bags/s · 60 per min` and bags leave A1
       much more often.
 - [ ] At about `01:10` A1 has about 21 bags waiting: its **Waiting** row
       and the **Waiting** indicator show the same number (the other desks
       stay at 0).
-- [ ] Drag the slider to `0`: no new bag appears at A1 and its queue
-      empties in about 50 simulated seconds.
+- [ ] On the **Controls** page (Desks), A1's slider reads the same rate and
+      its queue the same number. Drag A1's slider there to `0`: no new bag
+      appears at A1 and its queue empties in about 50 simulated seconds.
 
 ## 8. Reset
 
@@ -187,9 +199,10 @@ Do this after check 7, at 5×, with a belt stopped, a desk rate changed and
 a bag selected.
 
 - [ ] Click **Reset**: the map is empty at once, the time reads
-      `00:00.00 · tick 0`, the button reads **Start**, every indicator is
-      `0` and the mean travel time is `—`, Open alarms reads **None open**,
-      the Event log **No events yet**, and every light is green.
+      `00:00.00` and `tick 0`, the button reads **Start**, every indicator is
+      `0` and the mean travel time is `—`, the Alarms page reads **None
+      open** with no badge on the rail, the Events page **No events yet**,
+      and every light is a grey dot.
 - [ ] The selected bag is no longer selected; **5×** is still pressed.
 - [ ] The stopped belt is running again and the changed desk is back to
       `0.15 bags/s` (select them to check).
@@ -204,11 +217,12 @@ a bag selected.
 
 - [ ] Zoom in a little and select a belt. Stop the server with `Ctrl+C`:
       within a second a banner over the map reads **Connection lost ·
-      showing the last state received · reconnecting…**, the toolbar reads
-      **Disconnected · retrying…** without moving, Start/Pause, Reset, the
-      speeds and the panel's button or slider are disabled and look
-      disabled, the panel and indicators are dimmed and the indicators read
-      **Last values received before the connection was lost**.
+      showing the last state received · reconnecting…**, the top bar reads
+      **Reconnecting…** in amber without moving, Start/Pause, Reset, the
+      speeds, the Details page's buttons or slider and the Controls page are
+      disabled and look disabled, the details, strip and lists are dimmed and
+      the Indicators page reads **Last values received before the connection
+      was lost**.
 - [ ] Start the server again: within about a second the banner goes, the
       controls are enabled and the page shows the new server's state (tick
       0, no bags, indicators at zero). The zoom and the selected belt are
@@ -217,7 +231,7 @@ a bag selected.
       time and bags straight away, without replaying the missed movement.
 - [ ] With the simulation running, switch to another tab for about a minute,
       then come back: the map shows the current state at once, with no fast
-      replay, and the page is still **Connected**.
+      replay, and the page is still **Live**.
 
 ## 10. Fault and repair
 
@@ -228,9 +242,11 @@ times, act, then resume); a little later gives values close to them.
 - [ ] At `00:30`, select `line-2` and click **Simulate a fault**: State
       reads **Faulty · needs repair** in red, Alarms **Fault · active · open
       for … s** (highlighted), the second button becomes **Repair belt**,
-      the belt's surface stops and its light turns red and blinks. **Active
-      errors** `1` (highlighted in red) and **Errors** `1` (`1 fault · 0 wrong
-      sortings`, not highlighted); the alarm tops Open alarms; the Event log
+      the belt's surface stops and its light becomes a red cross and blinks.
+      **Active errors** `1` (highlighted in red in the strip) and **Errors**
+      `1` on the Indicators page (`1 fault · 0 wrong sortings`, not
+      highlighted); the Alarms badge turns red and the fault tops the Alarms
+      page under Faults; the Events page
       has one red `error` line, Belt line-2, **Belt fault: halted until
       repaired**.
 - [ ] Click **Stop belt** then **Restart belt**, and **Pause** then
@@ -242,32 +258,35 @@ times, act, then resume); a little later gives values close to them.
       Waiting 26, In transit 73, Active warnings 73. Errors stays `1`
       however long the fault lasts.
 - [ ] At `02:30`, click **Repair belt**: State **Running**, the light goes
-      green, **Active errors** `0` at once, **Errors** still `1`. Deliveries
+      back to a grey dot (or an amber triangle while bags on it still wait),
+      **Active errors** `0` at once, **Errors** still `1`. Deliveries
       resume, the prolonged waits resolve within about 9 s, the desks'
       queues clear by about `06:47`, the congestions by `08:43.30`, after
-      which Open alarms reads **None open**. With demand below capacity the
+      which the Alarms page reads **None open**. With demand below capacity the
       whole backlog clears by itself.
 - [ ] In the end **Errors** `1` and **Warnings** `90` (`16 congestions ·
       74 prolonged waits`), both not highlighted; the counter rules hold.
 
 ## 11. Forced error and wrong sorting
 
-- [ ] Click **Reset** (1×). With nothing selected, click **Force a wrong
-      sorting**: Forced error reads **On the next bag sorted**, highlighted,
-      the button is disabled, and the Event log shows an info line **Wrong sorting forced on the
-      next bag**.
+- [ ] Click **Reset** (1×). On the **Controls** page, **Sorting** view,
+      click **Force a wrong sorting**: the button is disabled, the note **The
+      next bag sorted will go down a wrong branch.** appears, the Details
+      page (nothing selected) reads Forced error **On the next bag sorted**,
+      highlighted, and the Events page shows an info line **Wrong sorting
+      forced on the next bag**.
 - [ ] Click **Start**. At `00:20.55` bag-3 (tag 3, BF 312) is sent down the
       first branch: Forced error goes back to **None**, the button is
       enabled again, **Errors** `1` (`0 faults · 1 wrong sorting`) and the
-      Event log has one `error` line, bag-3 · divert-1. Selecting bag-3
+      Events page has one `error` line, bag-3 · divert-1. Selecting bag-3
       shows **Sorting error · sent to Output BF 101** in red.
 - [ ] At `00:24.50` bag-3 drops into the BF 101 chute: the chute flashes red
       for about 3 simulated seconds, **Wrong exits** `1` (highlighted), and
-      the Event log adds an `info` line **Arrived at the wrong output**
+      the Events page adds an `info` line **Arrived at the wrong output**
       for bag-3 at Output BF 101. **Errors** stays `1`: the wrong exit is
       not a second error. At `01:00`: Delivered 24, Wrong exits 1.
-- [ ] Wrong sorting is not an alarm: Open alarms stays **None open**.
-- [ ] Drag the probability slider to `10 %` and release: the panel reads
+- [ ] Wrong sorting is not an alarm: the Alarms page stays **None open**.
+- [ ] Drag the probability slider to `10 %` and release: the Details page reads
       `10 % of sorter passages` and wrong sortings now happen now and then;
       each one adds one error and, when the bag exits, one wrong exit and no
       further error. Back to `0 %`: no more errors.
@@ -278,31 +297,59 @@ times, act, then resume); a little later gives values close to them.
 
 Use the fault of check 10 (or repeat it) with many alarms open.
 
-- [ ] Open alarms lists the alarms to acknowledge first, errors before
-      warnings, the newest first; each row shows the kind, what it concerns
-      (`Belt line-2`, `bag-… · Belt …`), its state and how long it has been
-      open, and an **Acknowledge** button.
+- [ ] The Alarms page groups the open alarms by kind — Faults, Congestion,
+      Prolonged waits, in that order — each group with its symbol, count and
+      an **Acknowledge N** button; inside a group, those to acknowledge first,
+      the newest first. Each row shows what it concerns (`Belt line-2`,
+      `bag-… · Belt …`), how long it has been open and an **Acknowledge**
+      button. The rail badge counts the alarms to acknowledge.
+- [ ] Click a group's name: it collapses, and stays collapsed as snapshots
+      arrive; click again to open it.
 - [ ] Click a row (not its button): the belt or bag is selected on the map
-      and in the panel.
-- [ ] Click **Acknowledge** on the fault: it moves below the active ones as
-      **acknowledged**, the belt is still **Faulty · needs repair**, the
-      panel's Alarms row is no longer highlighted, and the belt's light
+      and the Alarms page stays open (the Details page shows it).
+- [ ] Click **Acknowledge** on the fault: it reads **acknowledged**, the
+      belt is still **Faulty · needs repair**, the Details page's Alarms row
+      is no longer highlighted, and the belt's light
       stops blinking (steady red) unless a bag on it still has an active
       alarm. **Active errors** stays `1`, **Errors** does not change, and
-      the Event log adds an info line **Alarm acknowledged: …**.
+      the Events page adds an info line **Alarm acknowledged: …**.
 - [ ] Click **Acknowledge all**: every row reads **acknowledged**, the note
-      reads `… open · 0 to acknowledge`, the button is disabled, every light
-      is steady. New alarms raised afterwards come back blinking and active.
+      reads `… open · 0 to acknowledge`, the button is disabled, the badge
+      disappears and every light is steady. New alarms raised afterwards come back blinking and active.
 - [ ] Pause for 10 real seconds: the ages of the open alarms do not change.
 - [ ] Repair the belt: the fault leaves the list; the warnings leave it as
       the backlog clears, acknowledged or not.
-- [ ] Event log: the severity buttons hide and show their lines (e.g. only
+- [ ] Events page: the severity buttons hide and show their lines (e.g. only
       Errors shows the fault and any wrong sortings — still there after the
       repair of check 10, when about 300 events have been recorded: the page
       keeps the latest 200 of each severity); the note then reads
       `Latest … of N events in this run`.
-- [ ] **Reset** empties Open alarms and the Event log and turns every light
-      green.
+- [ ] **Reset** empties the Alarms and Events pages and turns every light
+      back to a grey dot.
+
+## 13. Layout and pages
+
+- [ ] Each rail button opens its page with a short fade; clicking the page
+      already open (or the arrow in the panel's corner) hides the side panel
+      and the map widens smoothly to the whole width, then sharpens. Clicking
+      a rail button shows the panel again. Reload: the page last open (and
+      whether the panel was hidden) is remembered.
+- [ ] Click a value in the strip under the map: the flow and delivery values
+      open the Indicators page, the active alarms the Alarms page.
+- [ ] **Controls** page: the Desks / Belts / Sorting tabs switch views. In
+      Belts, each belt shows the same symbol as its light on the map, its
+      state, and **Stop**/**Restart** and **Fault**/**Repair**; clicking a
+      belt's name outlines it on the map and keeps the Controls page open;
+      **Stop** on a belt gives the same result as **Stop belt** on its
+      Details page.
+- [ ] The **Legend** page shows the four light symbols and the blinking one,
+      the four destination codes with their colours, and how to use the map.
+- [ ] Narrow the window below about 860 px: the side panel floats over the
+      map instead of narrowing it, the strip keeps four values and the top
+      bar stays on one line.
+- [ ] Tab through the page with the keyboard: every button shows a visible
+      focus ring. With reduced motion turned on in the system, pages and the
+      panel switch without animation.
 
 ## Record
 

@@ -4,67 +4,166 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BaggageFlow</title>
+    <link rel="preload" href="/fonts/atkinson-hyperlegible-next.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/b612-mono-regular.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body>
-    <main>
-      <header>
-        <p class="eyebrow">Baggage sorting simulator</p>
-        <h1>BaggageFlow</h1>
-      </header>
-      <section aria-labelledby="map-title">
-        <div class="toolbar">
-          <h2 id="map-title">Plant</h2>
-          <button id="toggle" type="button" disabled>Start</button>
-          <button id="reset" type="button" class="secondary" disabled>Reset</button>
-          <div class="speeds" role="group" aria-label="Simulation speed">
+    <div class="app" data-dock="open">
+      <header class="topbar">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="4" y="7" width="16" height="12" rx="2.5" />
+            <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
+            <path d="M8 19v1.5M16 19v1.5" />
+          </svg>
+          <h1>BaggageFlow</h1>
+        </div>
+        <div class="transport" role="group" aria-label="Simulation">
+          <button id="toggle" type="button" class="primary" data-running="false" disabled>
+            <svg class="icon icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z" /></svg>
+            <svg class="icon icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h3v14H8zM13 5h3v14h-3z" /></svg>
+            <span class="label">Start</span>
+          </button>
+          <button id="reset" type="button" class="ghost" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12a7 7 0 1 0 2.1-5M5 4v4h4" /></svg>
+            <span class="label">Reset</span>
+          </button>
+          <div class="speeds segmented" role="group" aria-label="Simulation speed">
             <button type="button" data-speed="1" aria-pressed="true" disabled>1×</button>
             <button type="button" data-speed="2" aria-pressed="false" disabled>2×</button>
             <button type="button" data-speed="5" aria-pressed="false" disabled>5×</button>
           </div>
-          <p id="time" aria-live="off">00:00.00 · tick 0</p>
-          <p id="connection" data-state="disconnected">Connecting…</p>
         </div>
-        <div class="plant">
-          <div id="map">
-            <p id="status" role="status">Initializing graphics…</p>
-            <div class="map-tools" role="group" aria-label="View">
-              <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
-              <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
-              <button id="fit" type="button" aria-label="Show the whole plant">Fit</button>
-            </div>
+        <div class="clock" aria-live="off">
+          <span id="time">00:00.00</span>
+          <span id="tick">tick 0</span>
+        </div>
+        <p id="connection" data-state="disconnected">Connecting…</p>
+      </header>
+
+      <nav class="rail" aria-label="Pages">
+        <button type="button" data-page="inspect" aria-pressed="true" title="Details">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5.5M12 7.6v.1" /></svg>
+          <span>Details</span>
+        </button>
+        <button type="button" data-page="alarms" aria-pressed="false" title="Alarms">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5zM10 20.5h4" /></svg>
+          <span>Alarms</span>
+          <b id="alarms-badge" class="badge" hidden></b>
+        </button>
+        <button type="button" data-page="events" aria-pressed="false" title="Event log">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7h10M9 12h10M9 17h10M5 7h.1M5 12h.1M5 17h.1" /></svg>
+          <span>Events</span>
+        </button>
+        <button type="button" data-page="operate" aria-pressed="false" title="Controls">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg>
+          <span>Controls</span>
+        </button>
+        <button type="button" data-page="stats" aria-pressed="false" title="Indicators">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19.5h14M7.5 16v-5M12 16V6.5M16.5 16v-7" /></svg>
+          <span>Indicators</span>
+        </button>
+        <button type="button" data-page="legend" aria-pressed="false" title="Legend and help">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4M12 16.6v.1" /></svg>
+          <span>Legend</span>
+        </button>
+      </nav>
+
+      <aside class="dock" aria-labelledby="dock-title">
+        <div class="dock-inner">
+          <div class="dock-head">
+            <h2 id="dock-title">Details</h2>
+            <button id="dock-close" type="button" class="icon-button" aria-label="Hide the side panel" title="Hide the side panel">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5 9 12l5.5 5.5" /></svg>
+            </button>
           </div>
-          <aside id="panel" aria-labelledby="panel-title">
+
+          <section class="page" data-page="inspect" id="panel" aria-label="Details">
             <h3 id="panel-title">Details</h3>
             <div id="panel-body"></div>
             <div id="panel-actions"></div>
-          </aside>
-        </div>
-        <p id="hint">Scroll to zoom, drag to move the view, click a bag, a belt or a check-in desk for its details and commands; Esc clears the selection.</p>
-        <div class="indicators" aria-labelledby="indicators-title">
-          <div class="indicators-head">
-            <h3 id="indicators-title">Indicators</h3>
-            <p id="indicators-note"></p>
-          </div>
-          <div id="counters"></div>
-        </div>
-        <div class="alarms" aria-labelledby="alarms-title">
-          <div class="events-head">
-            <h3 id="alarms-title">Open alarms</h3>
-            <p id="alarms-note"></p>
-            <button id="acknowledge-all" type="button" class="secondary" disabled>Acknowledge all</button>
-          </div>
-          <ol id="alarm-list"></ol>
-        </div>
-        <div class="events" aria-labelledby="events-title">
-          <div class="events-head">
-            <h3 id="events-title">Event log</h3>
-            <p id="events-note"></p>
+          </section>
+
+          <section class="page alarms" data-page="alarms" aria-label="Open alarms" hidden>
+            <div class="page-head">
+              <p id="alarms-note"></p>
+              <button id="acknowledge-all" type="button" class="ghost small" disabled>Acknowledge all</button>
+            </div>
+            <div id="alarm-groups"></div>
+          </section>
+
+          <section class="page events" data-page="events" aria-label="Event log" hidden>
             <div class="severity-filter" role="group" aria-label="Severities shown"></div>
-          </div>
-          <ol id="event-list" aria-live="off"></ol>
+            <p id="events-note" class="page-note"></p>
+            <ol id="event-list" aria-live="off"></ol>
+          </section>
+
+          <section class="page operate" data-page="operate" aria-label="Controls" hidden>
+            <div class="segmented tabs" role="group" aria-label="Controls for">
+              <button type="button" data-view="desks" aria-pressed="true">Desks</button>
+              <button type="button" data-view="belts" aria-pressed="false">Belts</button>
+              <button type="button" data-view="sorting" aria-pressed="false">Sorting</button>
+            </div>
+            <div class="view" data-view="desks">
+              <p class="page-note">How many bags each check-in desk hands over. A new rate applies when you release the slider.</p>
+              <ul id="desk-list" class="control-list"></ul>
+            </div>
+            <div class="view" data-view="belts" hidden>
+              <p class="page-note">Stop a belt by hand, or simulate a fault the operator has to repair. Click a belt's name to find it on the map.</p>
+              <ul id="belt-list" class="control-list"></ul>
+            </div>
+            <div class="view" data-view="sorting" hidden>
+              <p class="page-note">Sorting errors send a bag down the wrong branch. They apply to every sorter.</p>
+              <div id="sorting-controls"></div>
+            </div>
+          </section>
+
+          <section class="page stats" data-page="stats" aria-label="Indicators" hidden>
+            <p id="indicators-note" class="page-note"></p>
+            <div id="counters"></div>
+          </section>
+
+          <section class="page legend" data-page="legend" aria-label="Legend and help" hidden>
+            <h3>Belt lights</h3>
+            <ul class="legend-list">
+              <li><i class="glyph" data-state="running"></i><span><b>Running</b> No attention needed.</span></li>
+              <li><i class="glyph" data-state="stopped"></i><span><b>Stopped</b> Halted by the operator.</span></li>
+              <li><i class="glyph" data-state="warning"></i><span><b>Warning</b> The belt is congested, or a bag on it has not moved for 30 s.</span></li>
+              <li><i class="glyph" data-state="fault"></i><span><b>Fault</b> The belt is broken and needs a repair.</span></li>
+              <li><i class="glyph blinking" data-state="fault"></i><span><b>Blinking</b> An alarm on the belt has not been acknowledged yet.</span></li>
+            </ul>
+            <h3>Destinations</h3>
+            <p class="page-note">Each bag's tag shows the code of its exit.</p>
+            <ul id="legend-destinations" class="legend-list"></ul>
+            <h3>Using the map</h3>
+            <ul class="legend-list keys">
+              <li><kbd>Scroll</kbd><span>Zoom around the pointer</span></li>
+              <li><kbd>Drag</kbd><span>Move the view</span></li>
+              <li><kbd>Click</kbd><span>Details of a bag, belt or check-in desk</span></li>
+              <li><kbd>Esc</kbd><span>Clear the selection</span></li>
+            </ul>
+          </section>
         </div>
-      </section>
-    </main>
+      </aside>
+
+      <main class="stage">
+        <div id="map">
+          <p id="status" role="status">Initializing graphics…</p>
+          <div class="map-tools" role="group" aria-label="View">
+            <button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12" /></svg>
+            </button>
+            <button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg>
+            </button>
+            <button id="fit" type="button" aria-label="Show the whole plant" title="Show the whole plant">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9V5h4M15 5h4v4M19 15v4h-4M9 19H5v-4" /></svg>
+            </button>
+          </div>
+        </div>
+        <div id="kpis" class="kpis" aria-label="Key indicators"></div>
+      </main>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

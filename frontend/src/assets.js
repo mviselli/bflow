@@ -226,14 +226,15 @@ function drawBeltShadows(ctx, scale, layout, ends, joints) {
   ctx.restore();
 }
 
-// Yellow chevrons painted on the floor along the right side of each belt,
-// pointing the way the bags travel.
+// Pale chevrons painted on the floor along the right side of each belt,
+// pointing the way the bags travel (not yellow: on this console amber means
+// a warning).
 function drawDirectionArrows(ctx, belt) {
   const spacingM = 3;
   const count = Math.max(1, Math.floor((belt.length_m - 1) / spacingM));
   const first = (belt.length_m - (count - 1) * spacingM) / 2;
   inFrame(ctx, belt.start, beltAngle(belt), () => {
-    ctx.strokeStyle = 'rgba(242, 194, 48, 0.8)';
+    ctx.strokeStyle = 'rgba(214, 220, 226, 0.4)';
     ctx.lineWidth = 0.07;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
@@ -273,7 +274,7 @@ function drawCheckInDesk(ctx, scale) {
   // Agent screen on the counter.
   ctx.fillStyle = '#10151a';
   ctx.fillRect(-1.42, -0.55, 0.16, 0.34);
-  ctx.fillStyle = 'rgba(117, 215, 192, 0.55)';
+  ctx.fillStyle = 'rgba(190, 212, 232, 0.5)';
   ctx.fillRect(-1.4, -0.53, 0.12, 0.3);
 
   ctx.save();

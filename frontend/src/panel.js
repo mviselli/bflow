@@ -1,7 +1,7 @@
-// Side panel: details of the selected belt, check-in desk or bag, and the
-// operator's commands for it (stop or restart a belt, fault or repair it, a
-// desk's arrival rate). With nothing selected it shows the plant and its
-// wrong-sorting commands, which apply to every sorter.
+// Details page of the side panel: the selected belt, check-in desk or bag,
+// and the operator's commands for it (stop or restart a belt, fault or
+// repair it, a desk's arrival rate). With nothing selected it shows a short
+// summary of the plant; its commands are on the Controls page.
 //
 // panelContent() is pure (tested with node --test): from the selection, the
 // layout and the newest snapshot it builds a title, a list of rows and the
@@ -18,7 +18,6 @@ import { count, formatTime } from './controls.js';
 // Highest rate the slider offers, as the server accepts (MAX_RATE_BAGS_S).
 export const MAX_RATE_BAGS_S = 1;
 const RATE_STEP_BAGS_S = 0.05;
-const MISSORT_STEP = 0.01;
 
 export function formatRate(rate) {
   return `${rate.toFixed(2)} bags/s · ${Math.round(rate * 60)} per min`;
@@ -157,12 +156,12 @@ function bagContent(id, layout, snapshot, destinations) {
 }
 
 // The plant as a whole: the wrong-sorting probability and forced error,
-// set for every sorter, and how many alarms are open.
+// set for every sorter (on the Controls page), and how many alarms are open.
 function plantContent(layout, snapshot) {
   const stats = snapshot?.stats;
   return {
     title: 'Plant',
-    hint: 'Select a bag, a belt or a check-in desk on the map to see its details here.',
+    hint: 'Click a bag, a belt or a check-in desk on the map to see its details and commands here.',
     rows: [
       {
         label: 'Wrong sorting',
@@ -179,9 +178,6 @@ function plantContent(layout, snapshot) {
       },
       { label: 'Sorters', value: String(layout.sorters.length) },
     ],
-    action: snapshot
-      ? { kind: 'missort', probability: snapshot.missort_probability, forced: snapshot.missort_forced }
-      : null,
   };
 }
 
@@ -221,71 +217,29 @@ function beltAction(onCommand) {
     update(action, connected) {
       current = action;
       stop.textContent = action.stopped ? 'Restart belt' : 'Stop belt';
-      stop.className = action.stopped ? '' : 'warning';
+      stop.className = action.stopped ? 'primary' : '';
       fault.textContent = action.faulty ? 'Repair belt' : 'Simulate a fault';
-      fault.className = action.faulty ? '' : 'danger';
+      fault.className = action.faulty ? 'primary' : 'danger';
       stop.disabled = fault.disabled = !connected;
     },
   };
 }
 
-// The plant's wrong-sorting commands: a probability slider, sent when
-// released, and a button forcing an error on the next bag sorted (disabled
-// while one is pending, since repeating it does nothing).
-function missortAction(onCommand) {
-  const element = document.createElement('div');
-  element.className = 'buttons';
-  const label = document.createElement('label');
-  label.className = 'rate';
-  const caption = document.createElement('span');
-  caption.textContent = 'Wrong sorting probability';
-  const slider = document.createElement('input');
-  slider.type = 'range';
-  slider.min = '0';
-  slider.max = '1';
-  slider.step = String(MISSORT_STEP);
-  const value = document.createElement('output');
-  label.append(caption, slider, value);
-  const force = document.createElement('button');
-  force.type = 'button';
-  force.className = 'danger';
-  force.textContent = 'Force a wrong sorting';
-  element.append(label, force);
-  let dragging = false;
-  slider.addEventListener('pointerdown', () => { dragging = true; });
-  slider.addEventListener('pointerup', () => { dragging = false; });
-  slider.addEventListener('input', () => { value.textContent = formatPercent(Number(slider.value)); });
-  slider.addEventListener('change', () => {
-    dragging = false;
-    onCommand({ type: 'set_missort_probability', probability: Number(slider.value) });
-  });
-  force.addEventListener('click', () => onCommand({ type: 'force_missort' }));
-  return {
-    element,
-    update(action, connected) {
-      slider.disabled = !connected;
-      force.disabled = !connected || action.forced;
-      if (dragging) return;
-      slider.value = String(action.probability);
-      value.textContent = formatPercent(action.probability);
-    },
-  };
-}
-
 // The arrival-rate slider of a desk: sends the new rate when released, and
-// follows the engine's rate otherwise.
-function rateAction(onCommand) {
+// follows the engine's rate otherwise. Also used by the Controls page.
+export function rateAction(onCommand, title = 'Set the arrival rate') {
   const label = document.createElement('label');
   label.className = 'rate';
   const caption = document.createElement('span');
-  caption.textContent = 'Set the arrival rate';
+  caption.textContent = title;
   const slider = document.createElement('input');
   slider.type = 'range';
   slider.min = '0';
   slider.max = String(MAX_RATE_BAGS_S);
   slider.step = String(RATE_STEP_BAGS_S);
+  slider.setAttribute('aria-label', title);
   const value = document.createElement('output');
-  label.append(caption, slider, value);
+  label.append(caption, value, slider);
   let current = null;
   let dragging = false;
   slider.addEventListener('pointerdown', () => { dragging = true; });
@@ -314,7 +268,7 @@ export function createPanel(element, { onCommand = () => {} } = {}) {
   const title = element.querySelector('#panel-title');
   const body = element.querySelector('#panel-body');
   const actions = element.querySelector('#panel-actions');
-  const controls = { belt: beltAction, rate: rateAction, missort: missortAction };
+  const controls = { belt: beltAction, rate: rateAction };
   let action = null;      // { key, control, current }
   let connected = false;
 

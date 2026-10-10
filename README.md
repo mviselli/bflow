@@ -42,43 +42,59 @@ restart the server.
 
 ## Use
 
+The page fills the window: the simulation controls along the top, the map in
+the middle with the key indicators under it, and a side panel on the left
+whose pages you pick from the rail beside it. Click the page already open (or
+the arrow in its corner) to hide the panel and give the map the whole width.
+
 Use **Start**, **Pause** and **Resume**, **Reset** to start again from the
 beginning, and **1×**, **2×** or **5×** to change the speed. Scroll over the
-map to zoom, drag to move the view and use **Fit** to see the whole plant
-again. Click a bag, a belt or a check-in desk to see its details in the side
-panel (a belt's state and occupancy, a bag's destination, position and travel
-time, a desk's queue and arrival rate). From the panel you can stop and
-restart a belt, simulate a fault on it and repair it, or change how many bags
-arrive at a desk. `Esc` clears the selection; with nothing selected the panel
-shows the whole plant, where you can set the chance of a wrong sorting or
-force one on the next bag.
+map to zoom, drag to move the view and use the buttons in its corner to zoom
+or see the whole plant again. Click a bag, a belt or a check-in desk to see
+its details on the **Details** page (a belt's state and occupancy, a bag's
+destination, position and travel time, a desk's queue and arrival rate).
+From there you can stop and restart a belt, simulate a fault on it and repair
+it, or change how many bags arrive at a desk. `Esc` clears the selection.
 
-Each belt has a light beside it: green running, grey stopped, amber with a
-warning (congestion, or a bag that has not moved for 30 s), red faulty. It
-blinks until its alarms are acknowledged. An output's chute flashes red when
-a bag arrives there by mistake.
+The page colours only what needs attention: the plant running normally is
+grey. Each belt has a light beside it, with its own symbol: a grey dot
+running, a blue square stopped by the operator, an amber triangle with a
+warning (congestion, or a bag that has not moved for 30 s), a red cross
+faulty. It blinks until its alarms are acknowledged. An output's chute
+flashes red when a bag arrives there by mistake. The **Legend** page explains
+the lights and the destination codes on the bags' tags.
 
-The indicators under the map come from the engine, in three groups: bag flow
-(generated, waiting at the desks, admitted, in transit), deliveries
-(delivered, wrong exits, throughput over the last 60 simulated seconds, mean
-travel time) and alarms (active errors and warnings — the alarms open now,
-highlighted while there are any — then errors and warnings since the start,
-with what they were); hover over one for its meaning. The command-line run
-prints the same breakdown and the alarms still open at the end.
+The pages of the side panel:
 
-Below them, the open alarms are listed, those still to acknowledge first.
-**Acknowledge** (or **Acknowledge all**) records that you have seen an alarm;
-it stays open until its cause ends — a repair, a restart, the queue clearing.
-Click an alarm to select its belt or bag on the map.
-
-Further down, the event log lists what happened in the run, newest first: the
-simulated time, the severity (error, warning or info), the bag or element
-involved and a description — faults and repairs, wrong sortings and wrong
-exits, congestions, prolonged waits, alarm acknowledgements and the operator's
-commands. The buttons above it show or hide each severity; the page keeps the
-latest 200 events of each severity (so a burst of information never hides
-a fault), and a page opened during a run starts from the latest 100
-the server still holds. A reset empties it.
+- **Details**: the selected bag, belt or desk and its commands.
+- **Alarms**: the open alarms grouped by kind — faults, congestion, prolonged
+  waits — those still to acknowledge first. **Acknowledge** (per alarm, per
+  group, or **Acknowledge all**) records that you have seen an alarm; it stays
+  open until its cause ends — a repair, a restart, the queue clearing. Click
+  an alarm to show its belt or bag on the map. The rail shows how many wait
+  for an acknowledgement.
+- **Events**: what happened in the run, newest first: the simulated time, the
+  bag or element involved and a description — faults and repairs, wrong
+  sortings and wrong exits, congestions, prolonged waits, alarm
+  acknowledgements and the operator's commands. The buttons on top show or
+  hide each severity (error, warning, info); the page keeps the latest 200
+  events of each severity (so a burst of information never hides a fault),
+  and a page opened during a run starts from the latest 100 the server still
+  holds. A reset empties it.
+- **Controls**: every command in one place, without finding the element on
+  the map: the arrival rate of each desk, Stop/Restart and Fault/Repair for
+  each belt, and the chance of a wrong sorting or a forced one on the next
+  bag.
+- **Indicators**: all the engine's indicators, in three groups: bag flow
+  (generated, waiting at the desks, admitted, in transit), deliveries
+  (delivered, wrong exits, throughput over the last 60 simulated seconds,
+  mean travel time) and alarms (active errors and warnings — the alarms open
+  now — then errors and warnings since the start, with what they were); hover
+  over one for its meaning. The strip under the map keeps the key ones in
+  view, highlighted while they call for attention; click one for more. The
+  command-line run prints the same breakdown and the alarms still open at
+  the end.
+- **Legend**: the belt lights, the destinations and how to use the map.
 
 If the server stops or the network drops, the page says so over the map,
 disables the commands and keeps the last state received, dimmed; it reconnects
@@ -144,3 +160,6 @@ tests/          Python tests
 ## License
 
 [AGPL-3.0](LICENSE)
+
+The page uses the typefaces Atkinson Hyperlegible Next and B612 Mono, both
+under the SIL Open Font License 1.1; their licences are in `frontend/public/fonts/`.

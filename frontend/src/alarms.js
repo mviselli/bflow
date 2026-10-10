@@ -1,11 +1,12 @@
-// Open alarms, under the indicators: each one the engine has raised and not
-// yet resolved, with an Acknowledge button while it is active. Clicking an
-// alarm selects its belt or bag on the map, where the panel offers what
-// ends it (a repair, a restart).
+// Open alarms page: each alarm the engine has raised and not yet resolved,
+// grouped by kind (faults first), with an Acknowledge button while it is
+// active. Clicking an alarm selects its belt or bag on the map, where the
+// Details page offers what ends it (a repair, a restart).
 //
-// alarmRows() is pure (tested with node --test). Acknowledging only tells
-// the engine the operator has seen the alarm: it stays open until its
-// condition ends, so the list shrinks only as the plant recovers.
+// alarmRows() and alarmGroups() are pure (tested with node --test).
+// Acknowledging only tells the engine the operator has seen the alarm: it
+// stays open until its condition ends, so the list shrinks only as the
+// plant recovers.
 
 import { eventSubject } from './eventlog.js';
 import { ALARM_NAMES } from './panel.js';
@@ -19,6 +20,7 @@ export function alarmRows(snapshot, layout) {
   open.sort((a, b) => rank(a) - rank(b) || b.raised_at_s - a.raised_at_s || b.id - a.id);
   return open.map((alarm) => ({
     id: alarm.id,
+    kind: alarm.kind,
     severity: alarm.severity,
     state: alarm.state,
     name: ALARM_NAMES[alarm.kind] ?? alarm.kind,
@@ -30,45 +32,113 @@ export function alarmRows(snapshot, layout) {
   }));
 }
 
-// The note beside the title.
+// The kinds in the order they are listed, the most serious first, with
+// the group's name.
+export const ALARM_GROUPS = [
+  ['belt_fault', 'Faults'],
+  ['congestion', 'Congestion'],
+  ['prolonged_wait', 'Prolonged waits'],
+];
+
+// The rows (in alarmRows order) split by kind: one group per kind with at
+// least one open alarm, in ALARM_GROUPS order, then any other kind.
+export function alarmGroups(rows) {
+  const known = ALARM_GROUPS.map(([kind]) => kind);
+  const kinds = [...known, ...new Set(rows.map((row) => row.kind).filter((kind) => !known.includes(kind)))];
+  return kinds.map((kind) => {
+    const members = rows.filter((row) => row.kind === kind);
+    return {
+      kind,
+      name: ALARM_GROUPS.find(([id]) => id === kind)?.[1] ?? kind,
+      severity: members[0]?.severity ?? null,
+      rows: members,
+      toAcknowledge: members.filter((row) => row.acknowledgeable).length,
+    };
+  }).filter((group) => group.rows.length > 0);
+}
+
+// The note above the groups.
 export function alarmsNote(rows) {
   if (rows.length === 0) return 'None open';
   const waiting = rows.filter((row) => row.acknowledgeable).length;
   return `${rows.length} open · ${waiting} to acknowledge`;
 }
 
-// Draws the list into its element. Rows are kept by alarm id and updated
-// in place, so a button is not replaced between a press and its release.
-export function createAlarmList(element, { onCommand, onSelect }) {
+// The badge on the rail: how many alarms wait for an acknowledgement, and
+// whether one of them is an error. Null when none do.
+export function alarmBadge(rows) {
+  const waiting = rows.filter((row) => row.acknowledgeable);
+  if (waiting.length === 0) return null;
+  return { count: waiting.length, severity: waiting.some((row) => row.severity === 'error') ? 'error' : 'warning' };
+}
+
+const CHEVRON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.5 9.5 5.5 5.5 5.5-5.5" /></svg>';
+
+// Draws the groups into the page. Groups are kept by kind and rows by alarm
+// id, and updated in place, so a button is not replaced between a press
+// and its release. A collapsed group stays collapsed until opened again.
+export function createAlarmList(element, { onCommand, onSelect, badge }) {
   const note = element.querySelector('#alarms-note');
-  const list = element.querySelector('#alarm-list');
+  const container = element.querySelector('#alarm-groups');
   const all = element.querySelector('#acknowledge-all');
+  const groups = new Map();  // kind → { section, parts }
   const items = new Map();   // alarm id → { item, parts }
+  const collapsed = new Set();
   let rows = [];
   let connected = false;
 
-  const empty = document.createElement('li');
-  empty.className = 'empty';
-  empty.textContent = 'No open alarms.';
+  const empty = document.createElement('p');
+  empty.className = 'empty-state';
+  empty.textContent = 'No open alarms. Faults, congestion and bags stuck for 30 s show up here.';
 
-  all.addEventListener('click', () => {
-    for (const row of rows) if (row.acknowledgeable) onCommand({ type: 'acknowledge_alarm', alarm_id: row.id });
-  });
+  const acknowledge = (list) => {
+    for (const row of list) if (row.acknowledgeable) onCommand({ type: 'acknowledge_alarm', alarm_id: row.id });
+  };
+  all.addEventListener('click', () => acknowledge(rows));
+
+  function groupSection(kind) {
+    const section = document.createElement('section');
+    section.className = 'alarm-group';
+    const head = document.createElement('div');
+    head.className = 'alarm-group-head';
+    const glyph = document.createElement('i');
+    glyph.className = 'glyph';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'toggle';
+    const title = document.createElement('span');
+    toggle.insertAdjacentHTML('beforeend', CHEVRON);
+    toggle.append(title);
+    const count = document.createElement('span');
+    count.className = 'count';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ghost small';
+    head.append(glyph, toggle, count, button);
+    const list = document.createElement('ol');
+    section.append(head, list);
+    const parts = { glyph, title, count, button, list, toggle, group: null };
+    toggle.addEventListener('click', () => {
+      if (collapsed.has(kind)) collapsed.delete(kind);
+      else collapsed.add(kind);
+      draw();
+    });
+    button.addEventListener('click', () => acknowledge(parts.group.rows));
+    return { section, parts };
+  }
 
   function rowItem(row) {
     const item = document.createElement('li');
-    const name = document.createElement('span');
-    name.className = 'name';
     const subject = document.createElement('span');
     subject.className = 'subject';
-    const state = document.createElement('span');
-    state.className = 'state';
+    const age = document.createElement('span');
+    age.className = 'age';
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = 'Acknowledge';
-    button.className = 'secondary';
-    item.append(name, subject, state, button);
-    const parts = { name, subject, state, button, row };
+    button.className = 'small';
+    item.append(subject, age, button);
+    const parts = { subject, age, button, row };
     button.addEventListener('click', (event) => {
       event.stopPropagation();
       onCommand({ type: 'acknowledge_alarm', alarm_id: parts.row.id });
@@ -80,31 +150,51 @@ export function createAlarmList(element, { onCommand, onSelect }) {
     return { item, parts };
   }
 
+  // Puts `wanted` in `parent` in that order, moving only nodes out of place.
+  function arrange(parent, wanted) {
+    wanted.forEach((node, index) => {
+      if (parent.children[index] !== node) parent.insertBefore(node, parent.children[index] ?? null);
+    });
+    while (parent.children.length > wanted.length) parent.lastChild.remove();
+  }
+
   function draw() {
     note.textContent = alarmsNote(rows);
     all.disabled = !connected || !rows.some((row) => row.acknowledgeable);
-    const seen = new Set();
-    const ordered = rows.map((row) => {
-      seen.add(row.id);
-      if (!items.has(row.id)) items.set(row.id, rowItem(row));
-      const { item, parts } = items.get(row.id);
-      parts.row = row;
-      item.dataset.severity = row.severity;
-      item.dataset.state = row.state;
-      parts.name.textContent = `${row.severity === 'error' ? '✖' : '▲'} ${row.name}`;
-      parts.subject.textContent = row.subject;
-      parts.state.textContent = `${row.state} · ${row.age}`;
-      parts.button.hidden = !row.acknowledgeable;
+    const shown = alarmGroups(rows);
+    const seenRows = new Set();
+    const sections = shown.map((group) => {
+      if (!groups.has(group.kind)) groups.set(group.kind, groupSection(group.kind));
+      const { section, parts } = groups.get(group.kind);
+      parts.group = group;
+      section.dataset.collapsed = String(collapsed.has(group.kind));
+      parts.toggle.setAttribute('aria-expanded', String(!collapsed.has(group.kind)));
+      parts.glyph.dataset.state = group.severity === 'error' ? 'fault' : 'warning';
+      parts.glyph.classList.toggle('blinking', group.toAcknowledge > 0);
+      parts.title.textContent = group.name;
+      parts.count.textContent = String(group.rows.length);
+      parts.button.textContent = `Acknowledge ${group.toAcknowledge}`;
+      parts.button.hidden = group.toAcknowledge === 0;
       parts.button.disabled = !connected;
-      return item;
+      const ordered = group.rows.map((row) => {
+        seenRows.add(row.id);
+        if (!items.has(row.id)) items.set(row.id, rowItem(row));
+        const { item, parts: rowParts } = items.get(row.id);
+        rowParts.row = row;
+        item.dataset.state = row.state;
+        rowParts.subject.textContent = row.subject;
+        rowParts.age.textContent = row.acknowledgeable ? row.age : `${row.state} · ${row.age}`;
+        rowParts.button.hidden = !row.acknowledgeable;
+        rowParts.button.disabled = !connected;
+        return item;
+      });
+      arrange(parts.list, ordered);
+      return section;
     });
-    for (const id of [...items.keys()]) if (!seen.has(id)) items.delete(id);
-    // Moves only the rows out of place: appending a node moves it.
-    const wanted = ordered.length > 0 ? ordered : [empty];
-    wanted.forEach((item, index) => {
-      if (list.children[index] !== item) list.insertBefore(item, list.children[index] ?? null);
-    });
-    while (list.children.length > wanted.length) list.lastChild.remove();
+    for (const id of [...items.keys()]) if (!seenRows.has(id)) items.delete(id);
+    for (const kind of [...groups.keys()]) if (!shown.some((group) => group.kind === kind)) groups.delete(kind);
+    arrange(container, sections.length > 0 ? sections : [empty]);
+    badge(alarmBadge(rows));
   }
   draw();
 

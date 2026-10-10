@@ -61,7 +61,7 @@ test('without a layout the panel shows nothing', () => {
   assert.equal(panelContent({ kind: 'belt', id: 'line' }, null, snapshot()), null);
 });
 
-test('nothing selected shows the plant, with its wrong-sorting commands', () => {
+test('nothing selected shows a summary of the plant; its commands are on the Controls page', () => {
   const content = panelContent(null, LAYOUT, snapshot());
   assert.equal(content.title, 'Plant');
   assert.ok(content.hint);
@@ -69,15 +69,13 @@ test('nothing selected shows the plant, with its wrong-sorting commands', () => 
     'Wrong sorting': '5 % of sorter passages', 'Forced error': 'None',
     'Open alarms': '1 error · 2 warnings', Sorters: '0',
   });
-  assert.deepEqual(content.action, { kind: 'missort', probability: 0.05, forced: false });
+  assert.equal(content.action, undefined);
   const forced = panelContent(null, LAYOUT, snapshot({ forced: true }));
   assert.equal(values(forced)['Forced error'], 'On the next bag sorted');
   assert.equal(forced.rows[1].alert, true);
-  assert.deepEqual(forced.action, { kind: 'missort', probability: 0.05, forced: true });
-  // Before the first snapshot: the plant without values or commands.
+  // Before the first snapshot: the plant without values.
   const early = panelContent(null, LAYOUT, null);
   assert.equal(values(early)['Wrong sorting'], '—');
-  assert.equal(early.action, null);
 });
 
 test('a belt shows its state, occupancy and connections from the snapshot', () => {

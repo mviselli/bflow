@@ -19,9 +19,15 @@
 // A halted belt (stopped by the operator or faulty) keeps its surface still.
 //
 // Signals sit over the frames (signals.js decides what they show): a status
-// light beside each belt — red faulty, amber warning, grey stopped, green
-// running, blinking while an alarm of the belt is not acknowledged — and a
-// red pulse over an output's chute when a bag arrives there by mistake.
+// light beside each belt, with its own symbol and colour — a small grey dot
+// running, a blue square stopped by the operator, an amber triangle for a
+// warning, a red circle with a cross faulty — blinking while an alarm of the
+// belt is not acknowledged, and a red pulse over an output's chute when a
+// bag arrives there by mistake.
+//
+// A resize (the window, or the side panel opening or closing) is shown like
+// a camera move: the textures already drawn are scaled at once and redrawn
+// sharp once the size stays still, so the map follows the panel smoothly.
 
 import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import {
@@ -47,16 +53,18 @@ const REBUILD_DELAY_MS = 150;
 const CLICK_SLOP_PX = 4;
 // Extra reach around bags and belts when picking, in screen pixels.
 const PICK_TOLERANCE_PX = 6;
-const SELECTION_COLOUR = 0xf2c230;
-// Status lights: colour by state, radius and place beside the belt (metres).
-const LIGHT_COLOURS = { fault: 0xff5c5c, warning: 0xf0a36b, stopped: 0x8fa3b5, running: 0x5fd38d };
+const SELECTION_COLOUR = 0xffffff;
+// Status lights: colour by state (as in styles.css), radius and place beside
+// the belt (metres).
+const LIGHT_COLOURS = { fault: 0xf0524f, warning: 0xf2b33d, stopped: 0x5b9bff, running: 0x8a939a };
+const LIGHT_BACKING = 0x15181a;
 const LIGHT_RADIUS_M = 0.17;
 const LIGHT_ALONG_M = 1.2;
 const LIGHT_ASIDE_M = BELT_WIDTH_M / 2 + 0.3;
 // A blinking light: on for this share of each period, in real time.
 const BLINK_PERIOD_S = 0.8;
 const BLINK_ON = 0.6;
-const WRONG_EXIT_COLOUR = 0xff4d4d;
+const WRONG_EXIT_COLOUR = 0xf0524f;
 
 // Outline of a rectangle along a belt: from `from` to `to` metres along it,
 // `widthM` wide, in screen pixels of `geometry`.
@@ -71,6 +79,26 @@ function outlineAlong(graphics, geometry, belt, from, to, widthM) {
   }));
   graphics.poly(corners.flatMap(({ x, y }) => [x, y]))
     .stroke({ width: 2, color: SELECTION_COLOUR, alignment: 1 });
+}
+
+// A belt light's symbol, centred on (x, y) and about `radius` in size.
+function drawLight(graphics, x, y, radius, state, alpha) {
+  const color = LIGHT_COLOURS[state];
+  if (state === 'running') {
+    graphics.circle(x, y, radius * 0.55).fill({ color, alpha });
+  } else if (state === 'stopped') {
+    const half = radius * 0.72;
+    graphics.rect(x - half, y - half, half * 2, half * 2).fill({ color, alpha });
+  } else if (state === 'warning') {
+    graphics.poly([x, y - radius * 0.95, x + radius, y + radius * 0.75, x - radius, y + radius * 0.75])
+      .fill({ color, alpha });
+  } else {
+    const arm = radius * 0.42;
+    graphics.circle(x, y, radius).fill({ color, alpha });
+    graphics.moveTo(x - arm, y - arm).lineTo(x + arm, y + arm)
+      .moveTo(x + arm, y - arm).lineTo(x - arm, y + arm)
+      .stroke({ width: Math.max(radius * 0.32, 1.5), color: LIGHT_BACKING, alpha, cap: 'round' });
+  }
 }
 
 export function createRenderer(app, { onSelect = () => {} } = {}) {
@@ -281,9 +309,9 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       const light = lights.get(belt.id);
       if (!light) continue;
       const { x, y } = besideBelt(belt, Math.min(LIGHT_ALONG_M, belt.length_m / 2), LIGHT_ASIDE_M);
-      const on = !light.blinking || lit;
-      signals.circle(x, y, radius * 1.35).fill({ color: 0x0b141c, alpha: 0.85 });
-      signals.circle(x, y, radius).fill({ color: LIGHT_COLOURS[light.state], alpha: on ? 1 : 0.25 });
+      const alpha = !light.blinking || lit ? 1 : 0.25;
+      signals.circle(x, y, radius * 1.35).fill({ color: LIGHT_BACKING, alpha: 0.85 });
+      drawLight(signals, x, y, radius, light.state, alpha);
     }
     for (const [outputId, progress] of wrongExitSignals(wrongExits, timeS)) {
       const output = layout.outputs.find((node) => node.id === outputId);
@@ -320,8 +348,16 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   // textures already drawn, then redraws them once the view stays still.
   function setCamera(next) {
     camera = next;
+    showView();
+  }
+
+  // The current camera on the current screen size, over the textures drawn
+  // for the last view; a full redraw follows once the view stays still.
+  function showView() {
     if (!geometry) return;
     const { width, height } = app.screen;
+    // A smaller screen can leave the centre out of range.
+    if (camera.centre) camera = clampCamera(layout, camera, width, height);
     const view = plantGeometry(layout, width, height, camera);
     const scale = view.pixelsPerMetre / geometry.pixelsPerMetre;
     world.scale.set(scale);
@@ -386,10 +422,9 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     press = null;
   });
 
-  // Resizing fires many events: rebuild the textures once, on the next frame.
-  app.renderer.on('resize', () => {
-    geometry = null;
-  });
+  // Resizing fires many events (one per frame while the side panel slides):
+  // follow each one with the textures already drawn, redraw once still.
+  app.renderer.on('resize', () => showView());
 
   function zoomBy(factor) {
     if (!layout) return;

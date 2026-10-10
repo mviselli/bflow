@@ -1,5 +1,6 @@
 // Top bar (start/pause, reset and speed buttons, connection state,
-// simulated time) and the engine's indicators (KPIs) under the map.
+// simulated time), the engine's indicators (KPIs) on the Indicators page and
+// the key ones in the strip under the map.
 //
 // The indicators are the engine's, copied from the snapshot as they are: the
 // page never computes its own version of the statistics, it only formats
@@ -72,6 +73,14 @@ export function indicators(stats) {
   })));
 }
 
+// The indicators always in view, in the strip under the map: the queue,
+// the flow, the outcome and the open alarms, as [key, page it opens]. The
+// strip shows the same values as the Indicators page.
+export const KEY_INDICATORS = [
+  ['waiting', 'stats'], ['in_transit', 'stats'], ['correctly_delivered', 'stats'], ['misdelivered', 'stats'],
+  ['throughput', 'stats'], ['active_errors', 'alarms'], ['active_warnings', 'alarms'],
+];
+
 function formatIndicator(key, value) {
   if (key === 'mean_travel_time_s') return value === null ? '—' : `${value.toFixed(1)} s`;
   return String(value);
@@ -96,15 +105,18 @@ export function toggleState(snapshot, resetFromRun = null) {
   return { running, label: running ? 'Pause' : snapshot.tick === 0 ? 'Start' : 'Resume' };
 }
 
-export function createControls({ onCommand }) {
+export function createControls({ onCommand, onOpen = () => {} }) {
   const button = document.querySelector('#toggle');
+  const label = button.querySelector('.label');
   const reset = document.querySelector('#reset');
   const speeds = [...document.querySelectorAll('.speeds button')];
   const connection = document.querySelector('#connection');
   const time = document.querySelector('#time');
+  const tick = document.querySelector('#tick');
   const counters = document.querySelector('#counters');
+  const strip = document.querySelector('#kpis');
 
-  // One tile per indicator: name, value and caption, grouped.
+  // One tile per indicator on the Indicators page: name, value and caption, grouped.
   const values = {};
   const notes = {};
   const tiles = {};
@@ -136,12 +148,32 @@ export function createControls({ onCommand }) {
     counters.append(section);
   }
 
+  // The strip under the map: one button per key indicator.
+  const keys = {};
+  for (const [key, page] of KEY_INDICATORS) {
+    const item = INDICATOR_GROUPS.flatMap((group) => group.items).find(([id]) => id === key);
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.title = `${item[3]} · click for more`;
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = item[1];
+    const value = document.createElement('span');
+    value.className = 'value';
+    value.textContent = '—';
+    tile.append(name, value);
+    tile.addEventListener('click', () => onOpen(page));
+    strip.append(tile);
+    keys[key] = { tile, value };
+  }
+
   let running = false;
   let run = null;           // run of the newest snapshot
   let resetFromRun = null;  // run being reset, until a snapshot of the new one arrives
   function showToggle(state) {
     running = state.running;
-    button.textContent = state.label;
+    label.textContent = state.label;
+    button.dataset.running = String(state.running);
   }
   button.addEventListener('click', () => onCommand({ type: running ? 'pause' : 'start' }));
   reset.addEventListener('click', () => {
@@ -158,7 +190,7 @@ export function createControls({ onCommand }) {
   return {
     setConnected(connected) {
       for (const control of [button, reset, ...speeds]) control.disabled = !connected;
-      connection.textContent = connected ? 'Connected' : 'Disconnected · retrying…';
+      connection.textContent = connected ? 'Live' : 'Reconnecting…';
       connection.dataset.state = connected ? 'connected' : 'disconnected';
       // A reset sent on a lost connection may never be applied.
       if (!connected) resetFromRun = null;
@@ -167,7 +199,8 @@ export function createControls({ onCommand }) {
       if (snapshot.run !== resetFromRun) resetFromRun = null;
       run = snapshot.run;
       showToggle(toggleState(snapshot, resetFromRun));
-      time.textContent = `${formatTime(snapshot.time_s)} · tick ${snapshot.tick}`;
+      time.textContent = formatTime(snapshot.time_s);
+      tick.textContent = `tick ${snapshot.tick}`;
       for (const speed of speeds) {
         speed.setAttribute('aria-pressed', String(Number(speed.dataset.speed) === snapshot.speed));
       }
@@ -176,6 +209,10 @@ export function createControls({ onCommand }) {
         notes[key].textContent = caption;
         if (alert) tiles[key].dataset.alert = alert;
         else delete tiles[key].dataset.alert;
+        if (!keys[key]) continue;
+        keys[key].value.textContent = value;
+        if (alert) keys[key].tile.dataset.alert = alert;
+        else delete keys[key].tile.dataset.alert;
       }
     },
   };
