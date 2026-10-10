@@ -41,6 +41,8 @@ canvas { display: block; touch-action: none; }
 #panel { display: flex; flex-direction: column; }
 #panel-actions { margin-top: auto; padding-top: 16px; }
 #panel-actions button { width: 100%; }
+#panel .buttons { display: grid; gap: 8px; }
+#panel .panel-hint { margin-bottom: 12px; }
 #panel .rate { display: grid; gap: 6px; }
 #panel .rate span { color: #aebfce; }
 #panel .rate input { width: 100%; accent-color: #75d7c0; }
@@ -73,6 +75,7 @@ button {
 button:disabled { background: #304354; color: #7d91a2; cursor: not-allowed; }
 button.secondary { color: #e8eef3; background: transparent; border: 1px solid #304354; }
 button.warning { background: #f0a36b; }
+button.danger { background: #ff7a7a; }
 .speeds { display: flex; }
 .speeds button {
   min-width: 44px; padding: 8px 10px; border-radius: 0; color: #e8eef3;
@@ -83,8 +86,8 @@ button.warning { background: #f0a36b; }
 .speeds button[aria-pressed="true"] { color: #0e1923; background: #75d7c0; border-color: #75d7c0; }
 .speeds button:disabled { color: #7d91a2; background: transparent; }
 /* After the coloured variants, so a disabled button always looks disabled. */
-button.secondary:disabled, button.warning:disabled { color: #7d91a2; }
-button.warning:disabled { background: #304354; }
+button.secondary:disabled, button.warning:disabled, button.danger:disabled { color: #7d91a2; }
+button.warning:disabled, button.danger:disabled { background: #304354; }
 /* Indicators under the map, in three groups of tiles. */
 .indicators { margin-top: 24px; }
 .indicators-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 12px; }
@@ -111,7 +114,37 @@ button.warning:disabled { background: #304354; }
 .indicator-group div[data-alert="error"] { border-left-color: #ff7a7a; }
 .indicator-group div[data-alert="error"] .value { color: #ff7a7a; }
 
-/* Event log under the indicators: newest first, filtered by severity. */
+/* Open alarms under the indicators: to acknowledge first, a click shows it on the map. */
+.alarms { margin-top: 24px; }
+#acknowledge-all { min-width: 0; padding: 4px 12px; font-size: 13px; }
+#alarm-list {
+  max-height: 240px; margin: 0; padding: 0; overflow-y: auto; list-style: none;
+  border: 1px solid #304354; border-radius: 8px; background: #122130; font-size: 14px;
+}
+#alarm-list li {
+  display: grid; grid-template-columns: 12rem minmax(0, 1fr) 15rem 8rem; align-items: center; gap: 4px 12px;
+  padding: 6px 12px; border-bottom: 1px solid #1d3042; border-left: 3px solid transparent; cursor: pointer;
+}
+#alarm-list li:hover { background: #172a3b; }
+#alarm-list li:last-child { border-bottom: 0; }
+#alarm-list li.empty { display: block; color: #7d91a2; cursor: default; }
+#alarm-list li.empty:hover { background: none; }
+#alarm-list .name { font-weight: 600; }
+#alarm-list .subject { overflow-wrap: anywhere; }
+#alarm-list .state { color: #aebfce; font-variant-numeric: tabular-nums; }
+#alarm-list button { min-width: 0; padding: 3px 10px; font-size: 13px; }
+#alarm-list li[data-severity="error"] { border-left-color: #ff7a7a; }
+#alarm-list li[data-severity="error"] .name { color: #ff7a7a; }
+#alarm-list li[data-severity="warning"] { border-left-color: #f0a36b; }
+#alarm-list li[data-severity="warning"] .name { color: #f0a36b; }
+/* Acknowledged: still open, no longer calling for attention. */
+#alarm-list li[data-state="acknowledged"] .name { color: #aebfce; }
+@media (max-width: 700px) {
+  #alarm-list li { grid-template-columns: 1fr auto; }
+  #alarm-list .subject, #alarm-list .state { grid-column: 1; }
+}
+
+/* Event log under the alarms: newest first, filtered by severity. */
 .events { margin-top: 24px; }
 .events-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
 .events-head h3 { margin: 0; font-size: 16px; }
@@ -151,4 +184,5 @@ button.warning:disabled { background: #304354; }
 /* Connection lost: the last state received stays visible, dimmed. */
 body[data-connection="disconnected"] #counters,
 body[data-connection="disconnected"] #event-list,
+body[data-connection="disconnected"] #alarm-list,
 body[data-connection="disconnected"] #panel-body { opacity: 0.45; }

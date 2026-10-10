@@ -6,7 +6,7 @@
 // them.
 
 // "1 fault", "2 faults".
-const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+export const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 // Indicators in three groups. Each one: key in the snapshot's stats, name,
 // a short caption shown under the value (text, or a function of the stats

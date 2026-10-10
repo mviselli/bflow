@@ -17,6 +17,11 @@
 // textures are redrawn sharp for the new view. Clicking a bag, a check-in
 // desk or a belt selects it: an outline follows it and onSelect reports it.
 // A halted belt (stopped by the operator or faulty) keeps its surface still.
+//
+// Signals sit over the frames (signals.js decides what they show): a status
+// light beside each belt — red faulty, amber warning, grey stopped, green
+// running, blinking while an alarm of the belt is not acknowledged — and a
+// red pulse over an output's chute when a bag arrives there by mistake.
 
 import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import {
@@ -29,6 +34,7 @@ import {
 } from './geometry.js';
 import { destinationLooks, hashString, shortCode, suitcaseLook } from './looks.js';
 import { advanceSurface, createPlayback, isNewRun } from './playback.js';
+import { addWrongExits, beltLights, wrongExitSignals } from './signals.js';
 
 // Real time in seconds, for the display clock.
 function nowSeconds() {
@@ -42,6 +48,15 @@ const CLICK_SLOP_PX = 4;
 // Extra reach around bags and belts when picking, in screen pixels.
 const PICK_TOLERANCE_PX = 6;
 const SELECTION_COLOUR = 0xf2c230;
+// Status lights: colour by state, radius and place beside the belt (metres).
+const LIGHT_COLOURS = { fault: 0xff5c5c, warning: 0xf0a36b, stopped: 0x8fa3b5, running: 0x5fd38d };
+const LIGHT_RADIUS_M = 0.17;
+const LIGHT_ALONG_M = 1.2;
+const LIGHT_ASIDE_M = BELT_WIDTH_M / 2 + 0.3;
+// A blinking light: on for this share of each period, in real time.
+const BLINK_PERIOD_S = 0.8;
+const BLINK_ON = 0.6;
+const WRONG_EXIT_COLOUR = 0xff4d4d;
 
 // Outline of a rectangle along a belt: from `from` to `to` metres along it,
 // `widthM` wide, in screen pixels of `geometry`.
@@ -63,9 +78,10 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   const floor = new Sprite();
   const surfaceLayer = new Container();
   const frame = new Sprite();
+  const signals = new Graphics();
   const highlight = new Graphics();
   const bagLayer = new Container();
-  world.addChild(floor, surfaceLayer, frame, highlight, bagLayer);
+  world.addChild(floor, surfaceLayer, frame, signals, highlight, bagLayer);
   app.stage.addChild(world);
 
   let layout = null;
@@ -80,6 +96,8 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   let selection = null;           // { kind: 'bag' | 'input' | 'belt', id } or null
   let haltedBelts = new Set();    // belts stopped or faulty, from the newest snapshot
   let newest = null;              // the newest snapshot
+  let lights = new Map();         // belt id → { state, blinking }, from the newest snapshot
+  let wrongExits = [];            // recent wrong arrivals, { outputId, timeS }
   const surfaceOffsets = new Map(); // belt id → offset of its surface in metres
   let surfaceTime = null;         // simulated time the surfaces were last moved to
   let resolution = 1;
@@ -244,6 +262,47 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       baggage.position_m + baggage.length_m + 0.08, BAGGAGE_WIDTH_M + 0.16);
   }
 
+  // A point `alongM` metres along a belt and `asideM` to the left of it.
+  function besideBelt(belt, alongM, asideM) {
+    const angle = beltAngle(belt);
+    const point = pointAlong(belt, alongM);
+    return geometry.toScreen({
+      x_m: point.x_m + Math.sin(angle) * asideM, y_m: point.y_m - Math.cos(angle) * asideM,
+    });
+  }
+
+  // Belt lights (newest snapshot, blinking in real time) and wrong-arrival
+  // pulses (displayed simulated time).
+  function drawSignals(timeS) {
+    signals.clear();
+    const lit = (nowSeconds() % BLINK_PERIOD_S) < BLINK_PERIOD_S * BLINK_ON;
+    const radius = Math.max(geometry.toPixels(LIGHT_RADIUS_M), 3);
+    for (const belt of layout.belts) {
+      const light = lights.get(belt.id);
+      if (!light) continue;
+      const { x, y } = besideBelt(belt, Math.min(LIGHT_ALONG_M, belt.length_m / 2), LIGHT_ASIDE_M);
+      const on = !light.blinking || lit;
+      signals.circle(x, y, radius * 1.35).fill({ color: 0x0b141c, alpha: 0.85 });
+      signals.circle(x, y, radius).fill({ color: LIGHT_COLOURS[light.state], alpha: on ? 1 : 0.25 });
+    }
+    for (const [outputId, progress] of wrongExitSignals(wrongExits, timeS)) {
+      const output = layout.outputs.find((node) => node.id === outputId);
+      const belt = layout.belts.find((item) => item.target_id === outputId);
+      if (!output || !belt) continue;
+      // Three pulses fading out over the chute, past the end of the belt.
+      const alpha = (1 - progress) * (0.55 + 0.45 * Math.cos(2 * Math.PI * 3 * progress));
+      const angle = beltAngle(belt);
+      const corners = [[0, -0.8], [BELT.drumM + 1.45, -0.8], [BELT.drumM + 1.45, 0.8], [0, 0.8]]
+        .map(([along, across]) => geometry.toScreen({
+          x_m: output.position.x_m + along * Math.cos(angle) - across * Math.sin(angle),
+          y_m: output.position.y_m + along * Math.sin(angle) + across * Math.cos(angle),
+        }));
+      signals.poly(corners.flatMap(({ x, y }) => [x, y]))
+        .fill({ color: WRONG_EXIT_COLOUR, alpha: alpha * 0.35 })
+        .stroke({ width: 3, color: WRONG_EXIT_COLOUR, alpha });
+    }
+  }
+
   // Called by the PixiJS ticker before each frame is rendered.
   function update() {
     if (!layout) return;
@@ -252,6 +311,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     if (timeS === null) return;
     moveSurfaces(timeS);
     placeBaggage(timeS);
+    drawSignals(timeS);
     drawHighlight();
   }
   app.ticker.add(update);
@@ -353,6 +413,8 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       surfaceOffsets.clear();
       surfaceTime = null;
       newest = null;
+      lights = new Map();
+      wrongExits = [];
       if (!keep) camera = FIT_CAMERA;
       geometry = null;
       drawnBags = [];
@@ -363,6 +425,8 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     // Back to the whole plant.
     fit: () => layout && setCamera(FIT_CAMERA),
     clearSelection: () => select(null),
+    // Selects a belt, desk or bag from outside the map (the alarm list).
+    select: (picked) => select(picked),
     setSnapshot(snapshot) {
       // A new run (a reset): nothing of the old run may stay on screen. Bag
       // ids start again from bag-1, so a selected bag would become another
@@ -371,8 +435,11 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
         if (selection?.kind === 'bag') select(null);
         surfaceOffsets.clear();
         surfaceTime = null;
+        wrongExits = [];
       }
       newest = snapshot;
+      lights = beltLights(snapshot);
+      wrongExits = addWrongExits(wrongExits, snapshot);
       haltedBelts = new Set(snapshot.belts.filter((belt) => belt.stopped || belt.faulty)
         .map((belt) => belt.id));
       playback.add(snapshot, nowSeconds());

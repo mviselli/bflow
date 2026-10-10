@@ -1,4 +1,4 @@
-// Event log under the indicators: the engine's events, newest first, with
+// Event log under the open alarms: the engine's events, newest first, with
 // simulated time, severity, the element or bag involved and the message,
 // and a filter by severity.
 //
@@ -8,7 +8,7 @@
 // duplicates, only the latest MAX_LOG_EVENTS, and starts over at a new run.
 // The page never makes up events: it only filters and formats them.
 
-import { formatTime } from './controls.js';
+import { count, formatTime } from './controls.js';
 import { elementName } from './panel.js';
 import { isNewRun } from './playback.js';
 
@@ -88,8 +88,6 @@ export function logNote(log) {
   if (log.events.length === log.lastId) return `${count(log.lastId, 'event')} in this run`;
   return `Latest ${log.events.length} of ${count(log.lastId, 'event')} in this run`;
 }
-
-const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 // Draws the log into its element: a filter button per severity (all shown
 // at first) and the list, redrawn only when the events or the filter change.

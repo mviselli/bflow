@@ -20,7 +20,7 @@ const LAYOUT = {
 
 function snapshot({
   stopped = false, faulty = false, congested = false, bags = 3, missortedTo = null, waiting = false,
-  alarms = [],
+  alarms = [], forced = false,
 } = {}) {
   return {
     tick: 400,
@@ -29,6 +29,8 @@ function snapshot({
     speed: 1,
     inputs: [{ id: 'input-a', arrival_rate_bags_s: 0.15 }],
     belts: [{ id: 'line', stopped, faulty, congested }],
+    missort_probability: 0.05,
+    missort_forced: forced,
     baggage: [{
       id: 'bag-7', destination_id: 'output-1', conveyor_id: 'line', position_m: 3.25,
       length_m: 0.6, entered_at_s: 12.5, missorted_to_id: missortedTo,
@@ -37,6 +39,8 @@ function snapshot({
     stats: {
       belts: [{ belt_id: 'line', bags, capacity: 6, occupancy: bags / 6 }],
       inputs: [{ input_id: 'input-a', waiting: 4 }],
+      active_errors: 1,
+      active_warnings: 2,
     },
     alarms,
   };
@@ -52,9 +56,28 @@ function alarm(id, kind, state, { element = 'line', bag = null, raised = 12 } = 
 
 const values = (content) => Object.fromEntries(content.rows.map(({ label, value }) => [label, value]));
 
-test('nothing selected shows nothing', () => {
-  assert.equal(panelContent(null, LAYOUT, snapshot()), null);
+test('without a layout the panel shows nothing', () => {
+  assert.equal(panelContent(null, null, snapshot()), null);
   assert.equal(panelContent({ kind: 'belt', id: 'line' }, null, snapshot()), null);
+});
+
+test('nothing selected shows the plant, with its wrong-sorting commands', () => {
+  const content = panelContent(null, LAYOUT, snapshot());
+  assert.equal(content.title, 'Plant');
+  assert.ok(content.hint);
+  assert.deepEqual(values(content), {
+    'Wrong sorting': '5 % of sorter passages', 'Forced error': 'None',
+    'Open alarms': '1 error · 2 warnings', Sorters: '0',
+  });
+  assert.deepEqual(content.action, { kind: 'missort', probability: 0.05, forced: false });
+  const forced = panelContent(null, LAYOUT, snapshot({ forced: true }));
+  assert.equal(values(forced)['Forced error'], 'On the next bag sorted');
+  assert.equal(forced.rows[1].alert, true);
+  assert.deepEqual(forced.action, { kind: 'missort', probability: 0.05, forced: true });
+  // Before the first snapshot: the plant without values or commands.
+  const early = panelContent(null, LAYOUT, null);
+  assert.equal(values(early)['Wrong sorting'], '—');
+  assert.equal(early.action, null);
 });
 
 test('a belt shows its state, occupancy and connections from the snapshot', () => {
@@ -66,14 +89,14 @@ test('a belt shows its state, occupancy and connections from the snapshot', () =
   });
   assert.equal(content.occupancy, 0.5);
   assert.equal(content.state, 'running');
-  assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: false });
+  assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: false, faulty: false });
 });
 
 test('a stopped belt says so', () => {
   const content = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ stopped: true }));
   assert.equal(values(content).State, 'Stopped by the operator');
   assert.equal(content.state, 'stopped');
-  assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: true });
+  assert.deepEqual(content.action, { kind: 'belt', beltId: 'line', stopped: true, faulty: false });
 });
 
 test('a congested belt shows the warning, highlighted', () => {
@@ -87,6 +110,8 @@ test('a faulty belt says so, and a fault wins over the operator\'s stop', () => 
   const faulty = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ faulty: true }));
   assert.equal(values(faulty).State, 'Faulty · needs repair');
   assert.equal(faulty.state, 'faulty');
+  // The panel offers the repair, and the stop independently of it.
+  assert.deepEqual(faulty.action, { kind: 'belt', beltId: 'line', stopped: false, faulty: true });
   const both = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ stopped: true, faulty: true }));
   assert.equal(values(both).State, 'Faulty · also stopped by the operator');
   assert.equal(both.state, 'faulty');

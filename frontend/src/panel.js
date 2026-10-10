@@ -1,5 +1,7 @@
 // Side panel: details of the selected belt, check-in desk or bag, and the
-// operator's commands for it (stop or restart a belt, a desk's arrival rate).
+// operator's commands for it (stop or restart a belt, fault or repair it, a
+// desk's arrival rate). With nothing selected it shows the plant and its
+// wrong-sorting commands, which apply to every sorter.
 //
 // panelContent() is pure (tested with node --test): from the selection, the
 // layout and the newest snapshot it builds a title, a list of rows and the
@@ -11,11 +13,12 @@
 // counters, the panel shows the newest snapshot, a fraction of a second ahead
 // of the picture.
 
-import { formatTime } from './controls.js';
+import { count, formatTime } from './controls.js';
 
 // Highest rate the slider offers, as the server accepts (MAX_RATE_BAGS_S).
 export const MAX_RATE_BAGS_S = 1;
 const RATE_STEP_BAGS_S = 0.05;
+const MISSORT_STEP = 0.01;
 
 export function formatRate(rate) {
   return `${rate.toFixed(2)} bags/s · ${Math.round(rate * 60)} per min`;
@@ -35,7 +38,7 @@ export function elementName(id, layout) {
 }
 
 // The engine's alarm kinds, as the operator reads them.
-const ALARM_NAMES = { belt_fault: 'Fault', congestion: 'Congestion', prolonged_wait: 'Prolonged wait' };
+export const ALARM_NAMES = { belt_fault: 'Fault', congestion: 'Congestion', prolonged_wait: 'Prolonged wait' };
 
 // An open alarm in words: what, its state, and how long it has been open in
 // simulated time (so it stands still while paused).
@@ -90,7 +93,7 @@ function beltContent(id, layout, snapshot) {
     occupancy: stats ? stats.occupancy : null,
     // 'running', 'stopped' or 'faulty' (a fault wins), for the state's colour.
     state: !state ? null : state.faulty ? 'faulty' : state.stopped ? 'stopped' : 'running',
-    action: state ? { kind: 'belt', beltId: id, stopped: state.stopped } : null,
+    action: state ? { kind: 'belt', beltId: id, stopped: state.stopped, faulty: state.faulty } : null,
   };
 }
 
@@ -153,28 +156,118 @@ function bagContent(id, layout, snapshot, destinations) {
   };
 }
 
-// What the panel shows: null when nothing (valid) is selected.
+// The plant as a whole: the wrong-sorting probability and forced error,
+// set for every sorter, and how many alarms are open.
+function plantContent(layout, snapshot) {
+  const stats = snapshot?.stats;
+  return {
+    title: 'Plant',
+    hint: 'Select a bag, a belt or a check-in desk on the map to see its details here.',
+    rows: [
+      {
+        label: 'Wrong sorting',
+        value: snapshot ? `${formatPercent(snapshot.missort_probability)} of sorter passages` : '—',
+      },
+      {
+        label: 'Forced error',
+        value: !snapshot ? '—' : snapshot.missort_forced ? 'On the next bag sorted' : 'None',
+        alert: Boolean(snapshot?.missort_forced),
+      },
+      {
+        label: 'Open alarms',
+        value: stats ? `${count(stats.active_errors, 'error')} · ${count(stats.active_warnings, 'warning')}` : '—',
+      },
+      { label: 'Sorters', value: String(layout.sorters.length) },
+    ],
+    action: snapshot
+      ? { kind: 'missort', probability: snapshot.missort_probability, forced: snapshot.missort_forced }
+      : null,
+  };
+}
+
+export function formatPercent(probability) {
+  return `${Math.round(probability * 100)} %`;
+}
+
+// What the panel shows: the plant when nothing is selected, null without a
+// layout or for an element that is not in it.
 export function panelContent(selection, layout, snapshot, destinations = new Map()) {
-  if (!selection || !layout) return null;
+  if (!layout) return null;
+  if (!selection) return plantContent(layout, snapshot);
   if (selection.kind === 'belt') return beltContent(selection.id, layout, snapshot);
   if (selection.kind === 'input') return inputContent(selection.id, layout, snapshot);
   return bagContent(selection.id, layout, snapshot, destinations);
 }
 
-// The Stop/Restart button of a belt.
+// The commands of a belt: the operator's Stop/Restart, and a fault to
+// simulate or repair. The two are independent, as in the engine.
 function beltAction(onCommand) {
-  const button = document.createElement('button');
-  button.type = 'button';
+  const element = document.createElement('div');
+  element.className = 'buttons';
+  const stop = document.createElement('button');
+  const fault = document.createElement('button');
+  stop.type = 'button';
+  fault.type = 'button';
+  element.append(stop, fault);
   let current = null;
-  button.addEventListener('click', () => onCommand({
+  stop.addEventListener('click', () => onCommand({
     type: current.stopped ? 'restart_belt' : 'stop_belt', belt_id: current.beltId,
   }));
+  fault.addEventListener('click', () => onCommand({
+    type: current.faulty ? 'repair_belt' : 'fault_belt', belt_id: current.beltId,
+  }));
   return {
-    element: button,
-    update(action) {
+    element,
+    update(action, connected) {
       current = action;
-      button.textContent = action.stopped ? 'Restart belt' : 'Stop belt';
-      button.className = action.stopped ? '' : 'warning';
+      stop.textContent = action.stopped ? 'Restart belt' : 'Stop belt';
+      stop.className = action.stopped ? '' : 'warning';
+      fault.textContent = action.faulty ? 'Repair belt' : 'Simulate a fault';
+      fault.className = action.faulty ? '' : 'danger';
+      stop.disabled = fault.disabled = !connected;
+    },
+  };
+}
+
+// The plant's wrong-sorting commands: a probability slider, sent when
+// released, and a button forcing an error on the next bag sorted (disabled
+// while one is pending, since repeating it does nothing).
+function missortAction(onCommand) {
+  const element = document.createElement('div');
+  element.className = 'buttons';
+  const label = document.createElement('label');
+  label.className = 'rate';
+  const caption = document.createElement('span');
+  caption.textContent = 'Wrong sorting probability';
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = '1';
+  slider.step = String(MISSORT_STEP);
+  const value = document.createElement('output');
+  label.append(caption, slider, value);
+  const force = document.createElement('button');
+  force.type = 'button';
+  force.className = 'danger';
+  force.textContent = 'Force a wrong sorting';
+  element.append(label, force);
+  let dragging = false;
+  slider.addEventListener('pointerdown', () => { dragging = true; });
+  slider.addEventListener('pointerup', () => { dragging = false; });
+  slider.addEventListener('input', () => { value.textContent = formatPercent(Number(slider.value)); });
+  slider.addEventListener('change', () => {
+    dragging = false;
+    onCommand({ type: 'set_missort_probability', probability: Number(slider.value) });
+  });
+  force.addEventListener('click', () => onCommand({ type: 'force_missort' }));
+  return {
+    element,
+    update(action, connected) {
+      slider.disabled = !connected;
+      force.disabled = !connected || action.forced;
+      if (dragging) return;
+      slider.value = String(action.probability);
+      value.textContent = formatPercent(action.probability);
     },
   };
 }
@@ -204,8 +297,9 @@ function rateAction(onCommand) {
   });
   return {
     element: label,
-    update(action) {
+    update(action, connected) {
       current = action;
+      slider.disabled = !connected;
       if (dragging) return;
       slider.value = String(action.rate);
       value.textContent = formatRate(action.rate);
@@ -220,31 +314,32 @@ export function createPanel(element, { onCommand = () => {} } = {}) {
   const title = element.querySelector('#panel-title');
   const body = element.querySelector('#panel-body');
   const actions = element.querySelector('#panel-actions');
-  let action = null;      // { key, control }
+  const controls = { belt: beltAction, rate: rateAction, missort: missortAction };
+  let action = null;      // { key, control, current }
   let connected = false;
 
   function showAction(content) {
     const next = content?.action;
-    const key = next && `${next.kind}:${next.beltId ?? next.inputId}`;
+    const key = next && `${next.kind}:${next.beltId ?? next.inputId ?? ''}`;
     if (action?.key !== key) {
       actions.replaceChildren();
       action = null;
       if (next) {
-        const control = next.kind === 'belt' ? beltAction(onCommand) : rateAction(onCommand);
+        const control = controls[next.kind](onCommand);
         actions.append(control.element);
         action = { key, control };
       }
     }
     if (action) {
-      action.control.update(next);
-      for (const input of actions.querySelectorAll('button, input')) input.disabled = !connected;
+      action.current = next;
+      action.control.update(next, connected);
     }
   }
 
   return {
     setConnected(value) {
       connected = value;
-      for (const input of actions.querySelectorAll('button, input')) input.disabled = !connected;
+      if (action) action.control.update(action.current, connected);
     },
     show(content) {
       showAction(content);
@@ -252,12 +347,15 @@ export function createPanel(element, { onCommand = () => {} } = {}) {
       if (!content) {
         element.dataset.state = '';
         title.textContent = 'Details';
-        const hint = document.createElement('p');
-        hint.textContent = 'Select a bag, a belt or a check-in desk on the map to see its details here.';
-        body.append(hint);
         return;
       }
       title.textContent = content.title;
+      if (content.hint) {
+        const hint = document.createElement('p');
+        hint.className = 'panel-hint';
+        hint.textContent = content.hint;
+        body.append(hint);
+      }
       if (content.destination) {
         const tag = document.createElement('p');
         tag.className = 'panel-tag';

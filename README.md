@@ -48,8 +48,15 @@ map to zoom, drag to move the view and use **Fit** to see the whole plant
 again. Click a bag, a belt or a check-in desk to see its details in the side
 panel (a belt's state and occupancy, a bag's destination, position and travel
 time, a desk's queue and arrival rate). From the panel you can stop and
-restart a belt, or change how many bags arrive at a desk. `Esc` clears the
-selection.
+restart a belt, simulate a fault on it and repair it, or change how many bags
+arrive at a desk. `Esc` clears the selection; with nothing selected the panel
+shows the whole plant, where you can set the chance of a wrong sorting or
+force one on the next bag.
+
+Each belt has a light beside it: green running, grey stopped, amber with a
+warning (congestion, or a bag that has not moved for 30 s), red faulty. It
+blinks until its alarms are acknowledged. An output's chute flashes red when
+a bag arrives there by mistake.
 
 The indicators under the map come from the engine, in three groups: bag flow
 (generated, waiting at the desks, admitted, in transit), deliveries
@@ -59,7 +66,12 @@ highlighted while there are any — then errors and warnings since the start,
 with what they were); hover over one for its meaning. The command-line run
 prints the same breakdown and the alarms still open at the end.
 
-Below them, the event log lists what happened in the run, newest first: the
+Below them, the open alarms are listed, those still to acknowledge first.
+**Acknowledge** (or **Acknowledge all**) records that you have seen an alarm;
+it stays open until its cause ends — a repair, a restart, the queue clearing.
+Click an alarm to select its belt or bag on the map.
+
+Further down, the event log lists what happened in the run, newest first: the
 simulated time, the severity (error, warning or info), the bag or element
 involved and a description — faults and repairs, wrong sortings and wrong
 exits, congestions, prolonged waits, alarm acknowledgements and the operator's

@@ -1,5 +1,6 @@
 import { Application } from 'pixi.js';
 import { connect } from './connection.js';
+import { createAlarmList } from './alarms.js';
 import { createControls } from './controls.js';
 import { createEventLog } from './eventlog.js';
 import { destinationLooks } from './looks.js';
@@ -49,11 +50,16 @@ async function initialize() {
   });
   const controls = createControls({ onCommand: (command) => link.send(command) });
   const eventLog = createEventLog(document.querySelector('.events'));
+  const alarmList = createAlarmList(document.querySelector('.alarms'), {
+    onCommand: (command) => link.send(command),
+    onSelect: (selection) => renderer.select(selection),
+  });
 
   link = connect({
     onConnectionChange(connected) {
       controls.setConnected(connected);
       panel.setConnected(connected);
+      alarmList.setConnected(connected);
       // Until the next connection, what is on screen is the last state received.
       const lost = !connected && latest !== null;
       document.body.dataset.connection = connected ? 'connected' : 'disconnected';
@@ -74,6 +80,7 @@ async function initialize() {
         renderer.setSnapshot(message);
         controls.setSnapshot(message);
         eventLog.setSnapshot(message);
+        alarmList.setSnapshot(message, layout);
         latest = message;
         showPanel();
       } else if (message.type === 'error') console.warn(message.message);
