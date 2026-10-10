@@ -20,8 +20,9 @@
 // A halted belt (stopped by the operator or faulty) keeps its surface still.
 //
 // Each sorter's mechanisms sit over the frames, under the bags (sorters.js
-// decides what they show): a divert flap on its plate, swung towards the
-// branch of the bag about to pass, and a photo-eye across the belt entering
+// decides what they show): a divert gate on its plate, hinged upstream on
+// the side away from its branch and swung across for the bag about to take
+// the branch, which is drawn sliding along it, and a photo-eye across the belt entering
 // it, its LED lit while a bag covers the beam. Each output's sign shows its
 // deliveries in a counter (the newest snapshot, like the indicators).
 //
@@ -54,7 +55,10 @@ import {
 } from './passengers.js';
 import { advanceSurface, createPlayback, isNewRun } from './playback.js';
 import { addWrongExits, beltLights, beltStates, dashes, wrongExitSignals } from './signals.js';
-import { eyeAlong, eyeBlocked, flapTargets, sorterBranches, stepFlap } from './sorters.js';
+import {
+  GATE, divertPose, eyeAlong, eyeBlocked, followOffset, gateOpening, routeOffset, sideBranchOf,
+  sorterBranches,
+} from './sorters.js';
 
 // Real time in seconds, for the display clock.
 function nowSeconds() {
@@ -89,12 +93,9 @@ const EDGE_PATTERNS = {
   fault: { onM: 0.18, offM: 0.14, widthM: 0.12 },
 };
 const STATE_OF_EDGE = { stopped: 'stopped', congested: 'warning', fault: 'fault' };
-// Divert flap: a gate hinged at the downstream corner of the plate on the
-// side away from its branch. Closed (straight on) it lies along that side's
-// rail; open it swings a quarter turn across the straight exit, so bags
-// turn into the branch. Bags turn at the plate's centre, clear of it.
-const FLAP_LENGTH_M = 0.8;
-const FLAP_OPEN_RAD = Math.PI / 2;
+// A bag sliding along a divert gate turns in steps of this angle, so the
+// textures drawn for it stay few.
+const DIVERT_TURN_STEP = Math.PI / 36;
 const STEEL = 0xc3ccd3;
 const STEEL_DARK = 0x22272c;
 const EYE_LIT = 0xf4f6f8;
@@ -169,8 +170,8 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   let queues = new Map();         // input id → its queue, from the snapshots (passengers.js)
   let sorters = new Map();        // sorter id → its belts and branches (sorters.js)
   let ends = new Map();           // belt id → its ends (geometry.js beltEnds)
-  const flaps = new Map();        // sorter id → (branch belt id → how open its flap is, 0 … 1)
-  let flapTime = null;            // simulated time the flaps were last moved to
+  let slides = new Map();         // bag id → route offset it is drawn at on a divert route
+  let slideTime = null;           // simulated time the slides were last moved to
   const surfaceOffsets = new Map(); // belt id → offset of its surface in metres
   let surfaceTime = null;         // simulated time the surfaces were last moved to
   let resolution = 1;
@@ -307,13 +308,43 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     }
   }
 
+  // A bag diverted into a side branch is drawn sliding along the open
+  // gate's face and turning into the branch, instead of turning sharply at
+  // the plate's centre: `place` (map point) and `placeAngle` replace its
+  // place on its belt. Its route offset follows the engine's, catching up
+  // the one-tick transfer at SLIDE_SPEED_M_S (sorters.js followOffset).
+  function divert(baggage, dtS, next) {
+    for (const sorter of sorters.values()) {
+      const branch = sideBranchOf(sorter, baggage);
+      if (!branch) continue;
+      const offset = followOffset(slides.get(baggage.id), routeOffset(sorter, branch, baggage), dtS);
+      next.set(baggage.id, offset);
+      const pose = divertPose(offset, branch.side);
+      if (!pose) return baggage;
+      const angle = beltAngle(sorter.incoming);
+      return {
+        ...baggage,
+        slideOffset: offset,
+        place: frameToMap(sorter.position, angle, pose.x, pose.y),
+        placeAngle: Math.round((angle + pose.angle) / DIVERT_TURN_STEP) * DIVERT_TURN_STEP,
+      };
+    }
+    return baggage;
+  }
+
   function placeBaggage(timeS) {
     const present = new Set();
-    drawnBags = playback.baggageAt(timeS, belts);
+    const dtS = slideTime === null ? 0 : timeS - slideTime;
+    slideTime = timeS;
+    const next = new Map();
+    drawnBags = playback.baggageAt(timeS, belts).map((baggage) => divert(baggage, dtS, next));
+    slides = next;
     for (const baggage of drawnBags) {
       const belt = belts.get(baggage.conveyor_id);
       if (!belt) continue;
-      const place = baggagePlacement(geometry, belt, baggage);
+      const place = baggage.place
+        ? { ...geometry.toScreen(baggage.place), angle: baggage.placeAngle }
+        : baggagePlacement(geometry, belt, baggage);
       const texture = bagTexture(baggage, place.angle);
       present.add(baggage.id);
       let sprite = bagSprites.get(baggage.id);
@@ -410,30 +441,23 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     return geometry.toScreen(frameToMap(sorter.position, beltAngle(sorter.incoming), x, y));
   }
 
-  // Divert flaps, turned towards their targets at a steady pace in
-  // displayed time, and the photo-eyes' beams and LEDs.
-  function drawMechanisms(timeS) {
-    const dtS = flapTime === null ? 0 : timeS - flapTime;
-    flapTime = timeS;
-    const targets = flapTargets(sorters, drawnBags);
+  // Divert gates, opened by the bags they divert (as drawn), and the
+  // photo-eyes' beams and LEDs.
+  function drawMechanisms() {
     mechanisms.clear();
     const px = (metres) => Math.max(geometry.toPixels(metres), 1);
     for (const sorter of sorters.values()) {
-      const open = flaps.get(sorter.id) ?? new Map();
-      flaps.set(sorter.id, open);
-      for (const { belt, side } of sorter.branches) {
+      for (const branch of sorter.branches) {
+        const { side } = branch;
         if (side === 0) continue;
-        const target = targets.has(sorter.id) ? Number(targets.get(sorter.id) === belt.id) : (open.get(belt.id) ?? 0);
-        const amount = stepFlap(open.get(belt.id) ?? 0, target, dtS);
-        open.set(belt.id, amount);
-        // Pointing upstream along the rail when closed, turning towards the
-        // branch's side as it opens.
-        const hingeX = BELT_WIDTH_M / 2 - 0.07;
-        const hingeY = -side * (BELT_WIDTH_M / 2 - BELT.railM - 0.04);
-        const angle = Math.PI - side * amount * FLAP_OPEN_RAD;
-        const hinge = sorterPoint(sorter, hingeX, hingeY);
-        const tip = sorterPoint(sorter, hingeX + FLAP_LENGTH_M * Math.cos(angle),
-          hingeY + FLAP_LENGTH_M * Math.sin(angle));
+        const amount = gateOpening(sorter, branch, drawnBags);
+        // Hinged upstream on the side away from the branch: along the rail
+        // when closed, swinging across the plate towards the branch.
+        const hingeY = side * GATE.hinge.y;
+        const angle = side * amount * GATE.openRad;
+        const hinge = sorterPoint(sorter, GATE.hinge.x, hingeY);
+        const tip = sorterPoint(sorter, GATE.hinge.x + GATE.lengthM * Math.cos(angle),
+          hingeY + GATE.lengthM * Math.sin(angle));
         mechanisms.moveTo(hinge.x, hinge.y).lineTo(tip.x, tip.y)
           .stroke({ width: px(0.075), color: STEEL_DARK, cap: 'round' });
         mechanisms.moveTo(hinge.x, hinge.y).lineTo(tip.x, tip.y)
@@ -488,6 +512,16 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     const belt = baggage && belts.get(baggage.conveyor_id);
     if (!belt) {
       select(null);
+      return;
+    }
+    if (baggage.place) {
+      // Sliding along a gate: an outline turned with the bag.
+      const halfLength = baggage.length_m / 2 + 0.08;
+      const halfWidth = BAGGAGE_WIDTH_M / 2 + 0.08;
+      const corners = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([a, b]) => geometry.toScreen(
+        frameToMap(baggage.place, baggage.placeAngle, a * halfLength, b * halfWidth)));
+      highlight.poly(corners.flatMap(({ x, y }) => [x, y]))
+        .stroke({ width: 2, color: SELECTION_COLOUR, alignment: 1 });
       return;
     }
     outlineAlong(highlight, geometry, belt, baggage.position_m - 0.08,
@@ -561,7 +595,9 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       if (!baggage.prolonged_wait) continue;
       const belt = belts.get(baggage.conveyor_id);
       if (!belt) continue;
-      const clock = geometry.toScreen(pointAlong(belt, baggage.position_m + 0.13));
+      const clock = geometry.toScreen(baggage.place
+        ? frameToMap(baggage.place, baggage.placeAngle, -baggage.length_m / 2 + 0.13, 0)
+        : pointAlong(belt, baggage.position_m + 0.13));
       const r = Math.max(geometry.toPixels(0.1), 3);
       badges.circle(clock.x, clock.y, r + 1).fill({ color: LIGHT_BACKING, alpha: baggage.alpha });
       badges.circle(clock.x, clock.y, r).fill({ color: LIGHT_COLOURS.warning, alpha: baggage.alpha });
@@ -579,7 +615,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     moveSurfaces(timeS);
     placePassengers(timeS);
     placeBaggage(timeS);
-    drawMechanisms(timeS);
+    drawMechanisms();
     drawSignals(timeS);
     drawBadges();
     drawHighlight();
@@ -691,8 +727,8 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
       destinations = destinationLooks(layout.outputs);
       sorters = sorterBranches(layout);
       ends = beltEnds(layout);
-      flaps.clear();
-      flapTime = null;
+      slides = new Map();
+      slideTime = null;
       edges = new Map();
       desks = layout.inputs.map((input) => ({
         id: input.id, belt: layout.belts.find((belt) => belt.source_id === input.id),
@@ -726,8 +762,8 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
         surfaceTime = null;
         wrongExits = [];
         queues = new Map();
-        flaps.clear();
-        flapTime = null;
+        slides = new Map();
+        slideTime = null;
       }
       newest = snapshot;
       queues = addQueueSnapshot(queues, snapshot);

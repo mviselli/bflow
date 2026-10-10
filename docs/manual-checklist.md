@@ -50,8 +50,8 @@ drawn yet, or one that is still fading out at its chute.
       the merges, the sort line with three sorters and four chutes with
       the signs BF 101, BF 205, BF 312 and BF 418, each with a counter at
       `0`. No bags. Beside each desk an empty queue lane, with no
-      passengers. Each sorter's plate has a steel gate lying along its far
-      rail, and a photo-eye (two small housings on the rails, a dark LED)
+      passengers. Each sorter's plate has a steel gate lying along its left
+      rail (seen along the line), and a photo-eye (two small housings on the rails, a dark LED)
       just before it. No belt has coloured edges.
 - [ ] The page fills the window with no page scroll. The top bar reads
       **Start**, **Reset**, **1×** (pressed), **2×**, **5×**, `00:00.00`,
@@ -91,11 +91,13 @@ drawn yet, or one that is still fading out at its chute.
 - [ ] At merges the belts take turns; each bag leaves the sort line on the
       branch whose sign has the colour and number of its tag (a 4 tag goes
       to the end of the line, BF 418).
-- [ ] Zoomed in on a sorter: as a bag for its branch comes near, the gate
-      swings a quarter turn across the straight exit and the bag turns into
-      the branch past it; for a bag going straight on the gate lies along
-      the rail. The photo-eye's LED lights white while a bag covers it.
-      Pause: the gate stops mid-swing, if it was moving.
+- [ ] Zoomed in on a sorter: as a bag for its branch comes near, the gate,
+      hinged at the plate's upstream left corner, swings 45° across it, and
+      the bag meets it, slides along its face and turns into the right-hand
+      branch (taking under a second, faster than the belt) instead of
+      turning on the spot; once the bag is past, the gate closes. For bags
+      going straight on it stays along the rail. The photo-eye's LED lights
+      white while a bag covers it. Pause: gate and bag stop where they are.
 - [ ] Each chute's counter goes up by one as a bag drops into it, and
       matches the sum shown under **Delivered**.
 - [ ] The first delivery comes at `00:28.30`: **Delivered** 1, **Throughput**
@@ -299,8 +301,9 @@ times, act, then resume); a little later gives values close to them.
       highlighted, and the Events page shows an info line **Wrong sorting
       forced on the next bag**.
 - [ ] Click **Start**. At `00:20.55` bag-3 (tag 3, BF 312) is sent down the
-      first branch — the first sorter's gate, lying along the rail for it,
-      swings across the straight exit just as it is sorted: Forced error goes back to **None**, the button is
+      first branch — the first sorter's gate, closed for it until then,
+      swings open just as it is sorted and the bag slides into the
+      branch: Forced error goes back to **None**, the button is
       enabled again, **Errors** `1` (`0 faults · 1 wrong sorting`) and the
       Events page has one `error` line, bag-3 · divert-1. Selecting bag-3
       shows **Sorting error · sent to Output BF 101** in red.
