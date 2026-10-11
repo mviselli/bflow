@@ -46,6 +46,7 @@ def run(engine: Engine, ticks: int) -> Engine:
     ('{"type": "pause"}', PauseCommand),
     (b'{"type": "pause"}', PauseCommand),
     ('{"type": "reset"}', ResetCommand),
+    ('{"type": "reset", "scenario_id": "peak"}', ResetCommand),
     ('{"type": "set_speed", "speed": 5}', SetSpeedCommand),
     ('{"type": "set_rate", "input_id": "input-a1", "rate_bags_s": 0.25}', SetRateCommand),
     ('{"type": "set_rate", "input_id": "input-a1", "rate_bags_s": 0}', SetRateCommand),
@@ -87,6 +88,8 @@ def test_known_commands_are_parsed(raw, expected):
     '{"type": "set_missort_probability"}',
     '{"type": "force_missort", "bag": "bag-1"}',
     '{"type": "reset", "seed": 7}',
+    '{"type": "reset", "scenario_id": ""}',
+    '{"type": "reset", "scenario_id": 2}',
     '{"type": "acknowledge_alarm"}',
     '{"type": "acknowledge_alarm", "alarm_id": 0}',
     '{"type": "acknowledge_alarm", "alarm_id": 1.5}',
@@ -125,6 +128,7 @@ def test_initial_layout_describes_the_minimal_route():
         }],
         "baggage_length_m": 0.6,
         "min_gap_m": 0.2,
+        "scenarios": [],
     }
 
 

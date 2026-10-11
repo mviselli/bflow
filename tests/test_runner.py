@@ -7,7 +7,7 @@ import pytest
 from bflow.core.engine import Engine
 from bflow.core.layout import default_layout, minimal_layout
 from bflow.core.models import Baggage
-from bflow.core.scenarios import fault_scenario
+from bflow.core.scenarios import SCENARIOS, fault_scenario, peak_scenario
 from bflow.server import runner as runner_module
 from bflow.server.protocol import (
     AcknowledgeAlarmCommand, FaultBeltCommand, ForceMissortCommand, PauseCommand, RepairBeltCommand, ResetCommand,
@@ -273,6 +273,79 @@ def test_reset_keeps_the_scheduled_actions_and_replays_them():
     for _ in range(1201):
         runner.engine.step()
     assert runner.engine.conveyors["line-2"].faulty
+
+
+def test_the_default_runner_runs_normal_traffic_and_offers_every_scenario():
+    runner, _ = make_runner()
+    assert runner.scenario_id == "normal"
+    assert list(runner.scenarios) == ["normal", "peak", "fault"]
+    assert runner.engine.actions == ()
+
+
+def test_a_reset_naming_a_scenario_switches_to_it_and_a_plain_reset_restores_it():
+    runner, clock = make_runner()
+    runner.submit(speed(5))
+    runner.submit(START)
+    runner.update()
+    clock.now += 1
+    runner.update()
+    runner.submit(ResetCommand(type="reset", scenario_id="peak"))
+    runner.update()
+    peak = peak_scenario()
+    assert runner.scenario_id == "peak"
+    assert (runner.engine.tick, runner.running, runner.speed, runner.run_number) == (0, False, 5, 2)
+    assert (runner.engine.seed, runner.engine.actions) == (peak.seed, peak.actions)
+    assert [record.command for record in runner.record] == [
+        ResetCommand(type="reset", scenario_id="peak")]
+    # The operator changes the plant; a plain reset brings the peak back as it starts.
+    runner.submit(SetRateCommand(type="set_rate", input_id="input-a1", rate_bags_s=1))
+    runner.submit(StopBeltCommand(type="stop_belt", belt_id="line-1"))
+    runner.update()
+    runner.engine.step()
+    runner.submit(ResetCommand(type="reset"))
+    runner.update()
+    assert (runner.scenario_id, runner.engine.tick, runner.run_number) == ("peak", 0, 3)
+    assert runner.engine.arrival_rates["input-a1"] == 0.15
+    assert not runner.engine.conveyors["line-1"].stopped
+    assert runner.engine.actions == peak.actions
+    # The record names the scenario even when the reset did not.
+    assert runner.record[0].command == ResetCommand(type="reset", scenario_id="peak")
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_after_selecting_a_scenario_the_run_is_the_scenario_itself(name):
+    runner, clock = make_runner()
+    runner.submit(ResetCommand(type="reset", scenario_id=name))
+    runner.submit(START)
+    runner.update()
+    for _ in range(80):
+        clock.now += 1
+        runner.update()
+    scenario = SCENARIOS[name]
+    direct = Engine(scenario.layout, seed=scenario.seed, actions=scenario.actions)
+    for _ in range(runner.engine.tick):
+        direct.step()
+    assert runner.engine.tick == 1600
+    assert runner.engine.stats() == direct.stats()
+
+
+def test_an_unknown_scenario_is_refused_and_the_run_goes_on():
+    runner, _ = make_runner()
+    with pytest.raises(ValueError, match="Unknown scenario"):
+        runner.submit(ResetCommand(type="reset", scenario_id="rush-hour"))
+    assert runner.commands.empty()
+
+
+def test_a_runner_on_another_plant_offers_no_scenario_and_resets_its_own_engine():
+    clock = FakeClock()
+    runner = Runner(Engine(minimal_layout(), seed=7), clock=clock)
+    assert (runner.scenarios, runner.scenario_id) == ({}, None)
+    with pytest.raises(ValueError, match="Unknown scenario"):
+        runner.submit(ResetCommand(type="reset", scenario_id="normal"))
+    runner.submit(ResetCommand(type="reset"))
+    runner.update()
+    assert (runner.engine.layout, runner.engine.seed) == (minimal_layout(), 7)
+    assert runner.record[0].command == ResetCommand(type="reset")
 
 
 def test_belt_and_rate_commands_reach_the_engine():

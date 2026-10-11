@@ -5,7 +5,8 @@ engine: web handlers only put commands in the queue. At every update the
 runner first applies all pending commands, then runs the ticks that real
 time says are due, in a limited group, and returns control to the server.
 The speed multiplies the ticks due per real second; reset replaces the
-engine with a new one built from the same layout, seed and scheduled actions.
+engine with a new one built from the current scenario (its layout, seed and
+scheduled actions), or from the scenario the reset names.
 
 Every applied command is recorded with the tick it was applied at: it takes
 effect from the next step, tick + 1. Replaying the recorded commands at the
@@ -21,7 +22,7 @@ from collections import deque
 from collections.abc import Callable
 
 from bflow.core.engine import STEP_MS, Engine
-from bflow.core.layout import default_layout
+from bflow.core.scenarios import SCENARIOS, Scenario
 from bflow.server.protocol import (
     BELT_COMMANDS, AcknowledgeAlarmCommand, Command, CommandRecord, FaultBeltCommand, ForceMissortCommand, PauseCommand,
     RepairBeltCommand, ResetCommand, RestartBeltCommand, SetMissortProbabilityCommand,
@@ -44,13 +45,26 @@ class Runner:
 
     The clock is a function returning real seconds (time.monotonic by
     default): tests pass a fake clock and call update() directly, without
-    waiting. Without an engine it runs the full plant (default_layout()),
-    starting stopped at tick 0.
+    waiting. Without an engine it runs the first of ``scenarios`` (normal
+    traffic on the demo plant), starting stopped at tick 0.
+
+    Only the scenarios of the engine's plant are offered: the layout never
+    changes, not even on reset, so the ids checked by submit() stay valid.
     """
 
     def __init__(self, engine: Engine | None = None, *,
-                 clock: Callable[[], float] = time.monotonic) -> None:
-        self.engine = engine if engine is not None else Engine(default_layout())
+                 clock: Callable[[], float] = time.monotonic,
+                 scenarios: dict[str, Scenario] = SCENARIOS) -> None:
+        # The scenario the current run started from; None for an engine
+        # passed in, which a reset rebuilds as it was.
+        self.scenario_id: str | None = None
+        if engine is None:
+            first = next(iter(scenarios.values()))
+            engine = _scenario_engine(first)
+            self.scenario_id = first.id
+        self.engine = engine
+        self.scenarios = {scenario_id: scenario for scenario_id, scenario in scenarios.items()
+                          if scenario.layout == engine.layout}
         self.clock = clock
         self.commands: asyncio.Queue[Command] = asyncio.Queue()
         self.running = False
@@ -68,9 +82,9 @@ class Runner:
     def submit(self, command: Command) -> None:
         """Queues a validated command; it is applied at the start of the next update.
 
-        Raises ValueError for a belt or input that is not in the plant, or
-        an alarm the engine has not raised, so the sender can be told at
-        once. The layout never changes, not even on reset, so the check
+        Raises ValueError for a belt, input or scenario that is not in the
+        plant, or an alarm the engine has not raised, so the sender can be
+        told at once. The layout never changes, not even on reset, so the check
         stays valid until the command is applied; alarms start over at a
         reset (see _apply).
         """
@@ -84,6 +98,9 @@ class Runner:
         elif isinstance(command, AcknowledgeAlarmCommand):
             if command.alarm_id > self.engine.last_alarm_id:
                 raise ValueError(f"Unknown alarm: {command.alarm_id}")
+        elif isinstance(command, ResetCommand) and command.scenario_id is not None:
+            if command.scenario_id not in self.scenarios:
+                raise ValueError(f"Unknown scenario: {command.scenario_id}")
         self.commands.put_nowait(command)
 
     def update(self) -> int:
@@ -122,7 +139,7 @@ class Runner:
         real time spent paused is never simulated afterwards and a new speed
         applies only from now. Reset keeps the speed and leaves the new
         engine paused at tick 0, in a new run whose record starts with the
-        reset itself. An acknowledgement checked against the old engine but
+        reset itself, naming the scenario it started from. An acknowledgement checked against the old engine but
         queued behind a reset names an alarm of the old run: the new engine
         has raised none yet, so it is dropped unrecorded.
         """
@@ -130,8 +147,14 @@ class Runner:
                 and command.alarm_id > self.engine.last_alarm_id):
             return
         if isinstance(command, ResetCommand):
-            self.engine = Engine(self.engine.layout, seed=self.engine.seed,
-                                 actions=self.engine.actions)
+            if command.scenario_id is not None:
+                self.scenario_id = command.scenario_id
+            if self.scenario_id is None:
+                self.engine = Engine(self.engine.layout, seed=self.engine.seed,
+                                     actions=self.engine.actions)
+            else:
+                self.engine = _scenario_engine(self.scenarios[self.scenario_id])
+                command = ResetCommand(type="reset", scenario_id=self.scenario_id)
             self.running = False
             self.run_number += 1
             self.record.clear()
@@ -151,6 +174,10 @@ class Runner:
     def _restart_clock(self, now: float) -> None:
         self._started_at = now
         self._started_tick = self.engine.tick
+
+
+def _scenario_engine(scenario: Scenario) -> Engine:
+    return Engine(scenario.layout, seed=scenario.seed, actions=scenario.actions)
 
 
 def apply_to_engine(engine: Engine, command: Command) -> None:

@@ -1,7 +1,7 @@
 // Start/pause button and time format of the top bar.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { INDICATOR_GROUPS, KEY_INDICATORS, formatTime, indicators, toggleState } from '../src/controls.js';
+import { INDICATOR_GROUPS, KEY_INDICATORS, formatTime, indicators, scenarioTitle, toggleState } from '../src/controls.js';
 
 function snapshot(run, tick, running) {
   return { run, tick, running };
@@ -72,4 +72,11 @@ test('the strip under the map shows engine indicators only, each opening an exis
   // Every indicator that can call for attention is in view.
   const alerting = indicators(stats()).filter((item) => item.alert).map((item) => item.key);
   assert.ok(alerting.every((key) => KEY_INDICATORS.some(([shown]) => shown === key)));
+});
+
+test('the top bar names the scenario the run started from, if any', () => {
+  const scenarios = [{ id: 'normal', title: 'Normal traffic' }, { id: 'fault', title: 'Belt fault' }];
+  assert.equal(scenarioTitle(scenarios, 'fault'), 'Belt fault');
+  assert.equal(scenarioTitle(scenarios, null), null);
+  assert.equal(scenarioTitle([], 'normal'), null);
 });

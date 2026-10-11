@@ -1,7 +1,7 @@
 // Controls page: desks, belts and sorting settings read from the snapshot.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { beltRows, deskRows, sortingState } from '../src/plantcontrols.js';
+import { beltRows, deskRows, scenarioRows, sortingState } from '../src/plantcontrols.js';
 
 const point = (x_m, y_m) => ({ x_m, y_m });
 
@@ -60,4 +60,21 @@ test('the sorting settings come from the snapshot', () => {
   assert.equal(sortingState(null), null);
   assert.deepEqual(sortingState(snapshot()), { probability: 0.1, forced: false });
   assert.deepEqual(sortingState(snapshot({ forced: true })), { probability: 0.1, forced: true });
+});
+
+test('the scenarios are listed in the server order, marking the current one', () => {
+  const layout = {
+    ...LAYOUT,
+    scenarios: [
+      { id: 'normal', title: 'Normal traffic', description: 'Below capacity.' },
+      { id: 'peak', title: 'Peak traffic', description: 'Above capacity for two minutes.' },
+    ],
+  };
+  assert.deepEqual(scenarioRows(layout, { ...snapshot(), scenario_id: 'peak' }), [
+    { id: 'normal', title: 'Normal traffic', description: 'Below capacity.', current: false },
+    { id: 'peak', title: 'Peak traffic', description: 'Above capacity for two minutes.', current: true },
+  ]);
+  // Before the first snapshot none is current; a server offering none lists none.
+  assert.ok(scenarioRows(layout, null).every((row) => !row.current));
+  assert.deepEqual(scenarioRows(LAYOUT, snapshot()), []);
 });

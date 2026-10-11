@@ -1,5 +1,5 @@
-// Top bar (start/pause, reset and speed buttons, connection state,
-// simulated time), the engine's indicators (KPIs) on the Indicators page and
+// Top bar (start/pause, reset and speed buttons, the current scenario,
+// connection state, simulated time), the engine's indicators (KPIs) on the Indicators page and
 // the key ones in the strip under the map.
 //
 // The indicators are the engine's, copied from the snapshot as they are: the
@@ -105,10 +105,19 @@ export function toggleState(snapshot, resetFromRun = null) {
   return { running, label: running ? 'Pause' : snapshot.tick === 0 ? 'Start' : 'Resume' };
 }
 
-export function createControls({ onCommand, onOpen = () => {} }) {
+// Title of the scenario the run started from, or null (an engine without
+// one, or before the first snapshot).
+export function scenarioTitle(scenarios, scenarioId) {
+  return scenarios.find((scenario) => scenario.id === scenarioId)?.title ?? null;
+}
+
+export function createControls({ onCommand, onOpen = () => {}, onScenario = () => {} }) {
   const button = document.querySelector('#toggle');
   const label = button.querySelector('.label');
   const reset = document.querySelector('#reset');
+  const scenario = document.querySelector('#scenario');
+  const scenarioName = scenario.querySelector('.name');
+  let scenarios = [];
   const speeds = [...document.querySelectorAll('.speeds button')];
   const connection = document.querySelector('#connection');
   const time = document.querySelector('#time');
@@ -175,19 +184,26 @@ export function createControls({ onCommand, onOpen = () => {} }) {
     label.textContent = state.label;
     button.dataset.running = String(state.running);
   }
-  button.addEventListener('click', () => onCommand({ type: running ? 'pause' : 'start' }));
-  reset.addEventListener('click', () => {
-    onCommand({ type: 'reset' });
+  // Reset, or start over with another scenario (a reset naming it).
+  function startOver(scenarioId = null) {
+    onCommand(scenarioId === null ? { type: 'reset' } : { type: 'reset', scenario_id: scenarioId });
     if (run !== null) {
       resetFromRun = run;
       showToggle({ running: false, label: 'Start' });
     }
-  });
+  }
+  button.addEventListener('click', () => onCommand({ type: running ? 'pause' : 'start' }));
+  reset.addEventListener('click', () => startOver());
+  scenario.addEventListener('click', () => onScenario());
   for (const speed of speeds) {
     speed.addEventListener('click', () => onCommand({ type: 'set_speed', speed: Number(speed.dataset.speed) }));
   }
 
   return {
+    startOver,
+    setLayout(message) {
+      scenarios = message.scenarios ?? [];
+    },
     setConnected(connected) {
       for (const control of [button, reset, ...speeds]) control.disabled = !connected;
       connection.textContent = connected ? 'Live' : 'Reconnecting…';
@@ -201,6 +217,9 @@ export function createControls({ onCommand, onOpen = () => {} }) {
       showToggle(toggleState(snapshot, resetFromRun));
       time.textContent = formatTime(snapshot.time_s);
       tick.textContent = `tick ${snapshot.tick}`;
+      const title = scenarioTitle(scenarios, snapshot.scenario_id);
+      scenario.hidden = title === null;
+      scenarioName.textContent = title ?? '';
       for (const speed of speeds) {
         speed.setAttribute('aria-pressed', String(Number(speed.dataset.speed) === snapshot.speed));
       }

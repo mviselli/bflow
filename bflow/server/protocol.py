@@ -2,8 +2,8 @@
 
 Every message is a JSON object with a ``type`` field. The server sends:
 
-- ``layout``: the plant (nodes, belts and their map coordinates), once
-  on connection;
+- ``layout``: the plant (nodes, belts and their map coordinates) and the
+  scenarios the server offers for it, once on connection;
 - ``snapshot``: the simulated state, several times per real second;
 - ``error``: a rejected command.
 
@@ -21,12 +21,14 @@ must agree (time_s = tick × 50 ms): a message cannot mix different instants.
 Units are those of the engine: metres, m/s, simulated seconds.
 """
 
+from collections.abc import Iterable
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from bflow.core.engine import STEP_MS, Engine
 from bflow.core.events import AlarmState, Severity
+from bflow.core.scenarios import Scenario
 
 
 class Message(BaseModel):
@@ -83,10 +85,19 @@ class BeltInfo(Message):
     speed_m_s: float = Field(gt=0)
 
 
+class ScenarioInfo(Message):
+    """A ready scenario the operator can start over with (see scenarios.py)."""
+
+    id: str
+    title: str
+    description: str
+
+
 class LayoutMessage(TimedMessage):
     """Static description of the plant, sent once on connection.
 
-    Elements are in layout order, as in the engine.
+    Elements are in layout order, as in the engine. ``scenarios`` are the
+    ready runs of this plant, in the order they are offered.
     """
 
     type: Literal["layout"] = "layout"
@@ -98,6 +109,7 @@ class LayoutMessage(TimedMessage):
     belts: list[BeltInfo]
     baggage_length_m: float = Field(gt=0)
     min_gap_m: float = Field(ge=0)
+    scenarios: list[ScenarioInfo] = []
 
 
 class BaggageState(Message):
@@ -232,6 +244,9 @@ class SnapshotMessage(TimedMessage):
     # 1 for the first run, +1 at every reset: a new number means the bags,
     # events and times belong to a new run, even if the tick did not go back.
     run: int = Field(ge=1)
+    # The scenario the run started from (a reset starts it over), or None
+    # for an engine built without one.
+    scenario_id: str | None
     running: bool
     # Simulated seconds per real second: 1, 2 or 5.
     speed: int = Field(ge=1)
@@ -255,7 +270,7 @@ class ErrorMessage(Message):
     message: str
 
 
-def layout_message(engine: Engine) -> LayoutMessage:
+def layout_message(engine: Engine, scenarios: Iterable[Scenario] = ()) -> LayoutMessage:
     """Describes the engine's plant, copied from its layout configuration."""
     layout = engine.layout
 
@@ -273,16 +288,18 @@ def layout_message(engine: Engine) -> LayoutMessage:
         belts=copy(BeltInfo, layout.belts),
         baggage_length_m=layout.baggage_length_m,
         min_gap_m=layout.min_gap_m,
+        scenarios=copy(ScenarioInfo, scenarios),
     )
 
 
 def snapshot_message(engine: Engine, *, running: bool, speed: int = 1, run: int = 1,
-                     after_event_id: int = 0) -> SnapshotMessage:
+                     scenario_id: str | None = None, after_event_id: int = 0) -> SnapshotMessage:
     """Builds the snapshot; events are those with an id greater than after_event_id."""
     return SnapshotMessage(
         tick=engine.tick,
         time_s=engine.time_s,
         run=run,
+        scenario_id=scenario_id,
         running=running,
         speed=speed,
         inputs=[InputState(id=input_id, arrival_rate_bags_s=rate)
@@ -318,9 +335,14 @@ class PauseCommand(Message):
 
 
 class ResetCommand(Message):
-    """Restores the initial plant, rates and seed, paused at tick 0."""
+    """Starts the run over, paused at tick 0, from a scenario's initial state.
+
+    Without ``scenario_id`` it restores the current scenario (its rates,
+    seed and scheduled actions); with one it switches to that scenario.
+    """
 
     type: Literal["reset"]
+    scenario_id: str | None = Field(default=None, min_length=1)
 
 
 # Simulation speeds offered to the operator: simulated seconds per real second.

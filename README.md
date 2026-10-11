@@ -47,8 +47,10 @@ the middle with the key indicators under it, and a side panel on the left
 whose pages you pick from the rail beside it. Click the page already open (or
 the arrow in its corner) to hide the panel and give the map the whole width.
 
-Use **Start**, **Pause** and **Resume**, **Reset** to start again from the
-beginning, and **1×**, **2×** or **5×** to change the speed. Scroll over the
+Use **Start**, **Pause** and **Resume**, **Reset** to start the current
+scenario again from the beginning, and **1×**, **2×** or **5×** to change the
+speed. The top bar names the scenario running — normal traffic at first;
+click it to choose another one (see **Controls** below). Scroll over the
 map to zoom, drag to move the view and use the buttons in its corner to zoom
 or see the whole plant again. Click a bag, a belt or a check-in desk to see
 its details on the **Details** page (a belt's state and occupancy, a bag's
@@ -91,8 +93,11 @@ The pages of the side panel:
   holds. A reset empties it.
 - **Controls**: every command in one place, without finding the element on
   the map: the arrival rate of each desk, Stop/Restart and Fault/Repair for
-  each belt, and the chance of a wrong sorting or a forced one on the next
-  bag.
+  each belt, the chance of a wrong sorting or a forced one on the next
+  bag, and the ready scenarios (normal traffic, a two-minute peak, a belt
+  fault at 60 s; the same ones as on the command line). Choosing a scenario
+  starts it from the beginning, paused; **Reset** then starts that scenario
+  over, with its own rates, seed and timed events.
 - **Indicators**: all the engine's indicators, in three groups: bag flow
   (generated, waiting at the desks, admitted, in transit), deliveries
   (delivered, wrong exits, throughput over the last 60 simulated seconds,
@@ -111,8 +116,9 @@ or desk.
 
 The server records every command with the simulation step it was applied at.
 [http://127.0.0.1:8000/api/commands](http://127.0.0.1:8000/api/commands) lists
-the commands of the current run (a reset starts a new one): the same seed and
-the same commands at the same steps always give the same run, at any speed.
+the commands of the current run (a reset starts a new one, and names the
+scenario it starts): the same scenario and the same commands at the same steps
+always give the same run, at any speed.
 
 ## Develop the page
 

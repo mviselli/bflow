@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from bflow.core.engine import Engine
 from bflow.core.layout import default_layout, minimal_layout
+from bflow.core.scenarios import SCENARIOS
 from bflow.server.app import FRONTEND_DIST, SNAPSHOT_INTERVAL_S, create_app
 from bflow.server.protocol import layout_message, snapshot_message
 from bflow.server.runner import Runner
@@ -74,7 +75,8 @@ def test_app_starts_stopped_at_tick_zero():
         clock.now += 5
         settle()
         assert client.get("/api/status").json() == {
-            "tick": 0, "time_s": 0.0, "running": False, "speed": 1, "run": 1}
+            "tick": 0, "time_s": 0.0, "running": False, "speed": 1, "run": 1,
+            "scenario": "normal"}
 
 
 def test_start_pause_and_resume_through_the_websocket():
@@ -131,6 +133,19 @@ def test_invalid_command_gets_an_error_and_the_connection_stays_open():
         wait_for_status(client, {"tick": 0, "time_s": 0.0, "running": True})
 
 
+def test_a_scenario_is_selected_over_the_websocket_and_an_unknown_one_refused():
+    app, runner, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        ws.send_text('{"type": "reset", "scenario_id": "rush-hour"}')
+        assert receive_until(ws, is_error)["message"] == "Invalid command: Unknown scenario: rush-hour"
+        ws.send_text('{"type": "reset", "scenario_id": "fault"}')
+        snapshot = receive_until(ws, lambda m: m["type"] == "snapshot" and m["run"] == 2)
+        assert (snapshot["scenario_id"], snapshot["tick"], snapshot["running"]) == ("fault", 0, False)
+        wait_for_status(client, {"run": 2, "scenario": "fault"})
+        assert client.get("/api/commands").json() == [
+            {"tick": 0, "time_s": 0.0, "command": {"type": "reset", "scenario_id": "fault"}}]
+
+
 def test_binary_frames_are_accepted():
     app, _, _ = make_app()
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
@@ -152,12 +167,16 @@ def test_the_simulation_keeps_running_after_the_client_disconnects():
 
 
 def test_layout_then_full_snapshot_on_connection():
-    # The default server runs the full plant.
+    # The default server runs normal traffic on the full plant, and offers
+    # every scenario.
     app, _, _ = make_app()
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         plant = Engine(default_layout())
-        assert ws.receive_json() == layout_message(plant).model_dump(mode="json")
-        assert ws.receive_json() == snapshot_message(plant, running=False).model_dump(mode="json")
+        layout = ws.receive_json()
+        assert layout == layout_message(plant, SCENARIOS.values()).model_dump(mode="json")
+        assert [scenario["id"] for scenario in layout["scenarios"]] == ["normal", "peak", "fault"]
+        assert ws.receive_json() == snapshot_message(
+            plant, running=False, scenario_id="normal").model_dump(mode="json")
 
 
 def test_snapshots_follow_start_pause_and_resume():
@@ -175,7 +194,8 @@ def test_snapshots_follow_start_pause_and_resume():
         engine = Engine(default_layout())
         for _ in range(140):
             engine.step()
-        assert snapshot == snapshot_message(engine, running=True).model_dump(mode="json")
+        assert snapshot == snapshot_message(engine, running=True,
+                                            scenario_id="normal").model_dump(mode="json")
         assert snapshot["baggage"]
 
         ws.send_text('{"type": "pause"}')
@@ -317,7 +337,7 @@ def test_the_commands_of_the_current_run_can_be_read_with_their_ticks():
         ws.send_text('{"type": "reset"}')
         wait_for_status(client, {"run": 2})
         assert client.get("/api/commands").json() == [
-            {"tick": 0, "time_s": 0.0, "command": {"type": "reset"}}]
+            {"tick": 0, "time_s": 0.0, "command": {"type": "reset", "scenario_id": "normal"}}]
 
 
 def test_snapshots_arrive_at_about_twelve_per_second():

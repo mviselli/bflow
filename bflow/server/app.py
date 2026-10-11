@@ -11,7 +11,7 @@ Handlers never call Engine.step(): they read the state or hand commands to
 the runner, which applies them in its own loop.
 
 The browser talks to the server over the WebSocket at /ws. On connection
-the server sends the ``layout`` once, then a ``snapshot`` immediately and
+the server sends the ``layout`` (with the scenarios on offer) once, then a ``snapshot`` immediately and
 about every SNAPSHOT_INTERVAL_S real seconds, while running or paused. Each
 connection remembers the last event it sent, so a snapshot carries only new
 events; a new connection receives the full current state and the recent
@@ -84,6 +84,7 @@ def create_app(runner: Runner | None = None, *, frontend_dir: Path = FRONTEND_DI
             "running": runner.running,
             "speed": runner.speed,
             "run": runner.run_number,
+            "scenario": runner.scenario_id,
         }
 
     # The commands applied in the current run, each with its tick: replayed
@@ -95,7 +96,8 @@ def create_app(runner: Runner | None = None, *, frontend_dir: Path = FRONTEND_DI
     @app.websocket("/ws")
     async def websocket(websocket: WebSocket) -> None:
         await websocket.accept()
-        await websocket.send_text(layout_message(runner.engine).model_dump_json())
+        layout = layout_message(runner.engine, runner.scenarios.values())
+        await websocket.send_text(layout.model_dump_json())
         sender = asyncio.create_task(_send_snapshots(websocket, runner))
         try:
             await _receive_commands(websocket, runner)
@@ -142,7 +144,8 @@ async def _send_snapshots(websocket: WebSocket, runner: Runner) -> None:
             engine = runner.engine
             last_event_id = 0
         snapshot = snapshot_message(engine, running=runner.running, speed=runner.speed,
-                                    run=runner.run_number, after_event_id=last_event_id)
+                                    run=runner.run_number, scenario_id=runner.scenario_id,
+                                    after_event_id=last_event_id)
         await websocket.send_text(snapshot.model_dump_json())
         if snapshot.events:
             last_event_id = snapshot.events[-1].id

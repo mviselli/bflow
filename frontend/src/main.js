@@ -79,7 +79,16 @@ async function initialize() {
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') renderer.clearSelection();
   });
-  const controls = createControls({ onCommand: send, onOpen: (page) => dock.open(page) });
+  let plantControls = null;
+  const controls = createControls({
+    onCommand: send,
+    onOpen: (page) => dock.open(page),
+    // The top bar's scenario name opens the list of scenarios.
+    onScenario() {
+      dock.open('operate');
+      plantControls.showView('scenario');
+    },
+  });
   const eventLog = createEventLog(document.querySelector('.page.events'));
   const badge = document.querySelector('#alarms-badge');
   const alarmList = createAlarmList(document.querySelector('.page.alarms'), {
@@ -91,9 +100,10 @@ async function initialize() {
       badge.dataset.severity = shown?.severity ?? '';
     },
   });
-  const plantControls = createPlantControls(document.querySelector('.page.operate'), {
+  plantControls = createPlantControls(document.querySelector('.page.operate'), {
     onCommand: send,
     onSelect: selectFromList,
+    onStartOver: (scenarioId) => controls.startOver(scenarioId),
   });
 
   link = connect({
@@ -116,6 +126,7 @@ async function initialize() {
         destinations = destinationLooks(layout.outputs);
         latest = null;
         renderer.setLayout(message);
+        controls.setLayout(message);
         eventLog.setLayout(message);
         plantControls.setLayout(message);
         showDestinations(layout, destinations);

@@ -1,10 +1,11 @@
 // Controls page of the side panel: every command of the plant in one place,
-// without looking for the element on the map first. Three views:
+// without looking for the element on the map first. Four views:
 // - Desks: the arrival rate of each check-in desk, and its queue;
 // - Belts: each belt's light and state, Stop/Restart and Fault/Repair;
-// - Sorting: the wrong sorting probability and a forced error.
+// - Sorting: the wrong sorting probability and a forced error;
+// - Scenario: the ready runs the server offers, to start over with one.
 //
-// deskRows(), beltRows() and sortingState() are pure (tested with node
+// deskRows(), beltRows(), sortingState() and scenarioRows() are pure (tested with node
 // --test): they read the layout and the newest snapshot, and the page only
 // formats what they return. The commands are the same ones the Details page
 // sends for a selected element.
@@ -47,6 +48,14 @@ export function beltRows(layout, snapshot) {
 export function sortingState(snapshot) {
   if (!snapshot) return null;
   return { probability: snapshot.missort_probability, forced: snapshot.missort_forced };
+}
+
+// The scenarios the server offers, in its order, marking the one the
+// current run started from (none before the first snapshot).
+export function scenarioRows(layout, snapshot) {
+  return (layout.scenarios ?? []).map(({ id, title, description }) => ({
+    id, title, description, current: snapshot?.scenario_id === id,
+  }));
 }
 
 // The wrong sorting commands: a probability slider, sent when released,
@@ -93,24 +102,25 @@ function sortingControls(element, onCommand) {
 
 // Draws the page. Rows are built once per layout and updated in place, so
 // a slider being dragged or a button being pressed is never replaced.
-export function createPlantControls(element, { onCommand, onSelect }) {
+export function createPlantControls(element, { onCommand, onSelect, onStartOver }) {
   const tabs = [...element.querySelectorAll('.tabs button')];
   const views = [...element.querySelectorAll('.view')];
   const deskList = element.querySelector('#desk-list');
   const beltList = element.querySelector('#belt-list');
+  const scenarioList = element.querySelector('#scenario-list');
   const updateSorting = sortingControls(element.querySelector('#sorting-controls'), onCommand);
   let layout = null;
   let snapshot = null;
   let connected = false;
   let desks = new Map();   // input id → { waiting, rate control }
   let belts = new Map();   // belt id → { glyph, state, stop, fault, row }
+  let scenarios = new Map();  // scenario id → { item, button }
 
-  for (const tab of tabs) {
-    tab.addEventListener('click', () => {
-      for (const other of tabs) other.setAttribute('aria-pressed', String(other === tab));
-      for (const view of views) view.hidden = view.dataset.view !== tab.dataset.view;
-    });
+  function showView(name) {
+    for (const tab of tabs) tab.setAttribute('aria-pressed', String(tab.dataset.view === name));
+    for (const view of views) view.hidden = view.dataset.view !== name;
   }
+  for (const tab of tabs) tab.addEventListener('click', () => showView(tab.dataset.view));
 
   function deskItem(row) {
     const item = document.createElement('li');
@@ -158,6 +168,26 @@ export function createPlantControls(element, { onCommand, onSelect }) {
     return parts;
   }
 
+  function scenarioItem(row) {
+    const item = document.createElement('li');
+    const head = document.createElement('div');
+    head.className = 'scenario-head';
+    const title = document.createElement('b');
+    title.textContent = row.title;
+    const tag = document.createElement('span');
+    tag.className = 'current';
+    tag.textContent = 'Current';
+    head.append(title, tag);
+    const description = document.createElement('p');
+    description.textContent = row.description;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.addEventListener('click', () => onStartOver(row.id));
+    item.append(head, description, button);
+    scenarioList.append(item);
+    return { item, button };
+  }
+
   function draw() {
     if (!layout) return;
     for (const row of deskRows(layout, snapshot)) {
@@ -181,6 +211,13 @@ export function createPlantControls(element, { onCommand, onSelect }) {
       belt.stop.disabled = belt.fault.disabled = !connected || !row.known;
     }
     updateSorting(sortingState(snapshot), connected);
+    for (const row of scenarioRows(layout, snapshot)) {
+      const { item, button } = scenarios.get(row.id);
+      item.toggleAttribute('data-current', row.current);
+      button.textContent = row.current ? 'Start over' : 'Choose';
+      button.className = row.current ? 'small ghost' : 'small';
+      button.disabled = !connected || !snapshot;
+    }
   }
 
   return {
@@ -189,10 +226,13 @@ export function createPlantControls(element, { onCommand, onSelect }) {
       snapshot = null;
       deskList.replaceChildren();
       beltList.replaceChildren();
+      scenarioList.replaceChildren();
       desks = new Map(deskRows(layout, null).map((row) => [row.id, deskItem(row)]));
       belts = new Map(beltRows(layout, null).map((row) => [row.id, beltItem(row)]));
+      scenarios = new Map(scenarioRows(layout, null).map((row) => [row.id, scenarioItem(row)]));
       draw();
     },
+    showView,
     setSnapshot(message) {
       snapshot = message;
       draw();

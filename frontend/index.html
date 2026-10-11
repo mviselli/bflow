@@ -34,6 +34,10 @@
             <button type="button" data-speed="5" aria-pressed="false" disabled>5×</button>
           </div>
         </div>
+        <button id="scenario" type="button" class="scenario-chip" title="Choose a scenario" hidden>
+          <span class="caption">Scenario</span>
+          <span class="name"></span>
+        </button>
         <div class="clock" aria-live="off">
           <span id="time">00:00.00</span>
           <span id="tick">tick 0</span>
@@ -103,6 +107,7 @@
               <button type="button" data-view="desks" aria-pressed="true">Desks</button>
               <button type="button" data-view="belts" aria-pressed="false">Belts</button>
               <button type="button" data-view="sorting" aria-pressed="false">Sorting</button>
+              <button type="button" data-view="scenario" aria-pressed="false">Scenario</button>
             </div>
             <div class="view" data-view="desks">
               <p class="page-note">How many bags each check-in desk hands over. A new rate applies when you release the slider.</p>
@@ -115,6 +120,10 @@
             <div class="view" data-view="sorting" hidden>
               <p class="page-note">Sorting errors send a bag down the wrong branch. They apply to every sorter.</p>
               <div id="sorting-controls"></div>
+            </div>
+            <div class="view" data-view="scenario" hidden>
+              <p class="page-note">A ready run of the plant, the same every time. Choosing one starts over from its beginning, paused; Reset starts the current one over.</p>
+              <ul id="scenario-list" class="control-list"></ul>
             </div>
           </section>
 
