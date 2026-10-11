@@ -4,7 +4,8 @@ Every message is a JSON object with a ``type`` field. The server sends:
 
 - ``layout``: the plant (nodes, belts and their map coordinates) and the
   scenarios the server offers for it, once on connection;
-- ``snapshot``: the simulated state, several times per real second;
+- ``snapshot``: the simulated state, several times per real second, with
+  the events and chart samples the reader has not received yet;
 - ``error``: a rejected command.
 
 The browser sends commands: ``start``, ``pause``, ``reset``, ``set_speed``,
@@ -237,6 +238,16 @@ class AlarmInfo(Message):
     resolved_at_s: float | None = Field(ge=0)
 
 
+class SampleState(TimedMessage):
+    """One sample of the engine's series for the charts (stats.Sample)."""
+
+    in_transit: int = Field(ge=0)
+    waiting: int = Field(ge=0)
+    correctly_delivered: int = Field(ge=0)
+    misdelivered: int = Field(ge=0)
+    throughput: int = Field(ge=0)
+
+
 class SnapshotMessage(TimedMessage):
     """Simulated state at one tick, with only the events the reader has not seen."""
 
@@ -263,6 +274,9 @@ class SnapshotMessage(TimedMessage):
     # then the latest resolved ones, in the order they were resolved.
     alarms: list[AlarmInfo]
     events: list[EventState]
+    # The engine's samples (one per simulated second) after the reader's
+    # last one, oldest first: all those still kept for a new reader.
+    series: list[SampleState]
 
 
 class ErrorMessage(Message):
@@ -293,8 +307,10 @@ def layout_message(engine: Engine, scenarios: Iterable[Scenario] = ()) -> Layout
 
 
 def snapshot_message(engine: Engine, *, running: bool, speed: int = 1, run: int = 1,
-                     scenario_id: str | None = None, after_event_id: int = 0) -> SnapshotMessage:
-    """Builds the snapshot; events are those with an id greater than after_event_id."""
+                     scenario_id: str | None = None, after_event_id: int = 0,
+                     after_sample_tick: int = -1) -> SnapshotMessage:
+    """Builds the snapshot with the events after after_event_id and the
+    samples after after_sample_tick."""
     return SnapshotMessage(
         tick=engine.tick,
         time_s=engine.time_s,
@@ -316,6 +332,8 @@ def snapshot_message(engine: Engine, *, running: bool, speed: int = 1, run: int 
                 for alarm in (*engine.alarms.values(), *engine.resolved_alarms)],
         events=[EventState.model_validate(event, from_attributes=True)
                 for event in engine.events.since(after_event_id)],
+        series=[SampleState.model_validate(sample, from_attributes=True)
+                for sample in engine.series if sample.tick > after_sample_tick],
     )
 
 

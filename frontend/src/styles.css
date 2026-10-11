@@ -43,6 +43,11 @@
   --warn: #f2b33d;
   --fault: #f0524f;
   --running: #8a939a;
+  /* Chart lines: hues kept apart from the state colours (validated for
+     colour blindness on --surface); deliveries in the light ink. */
+  --series-transit: #9085e9;
+  --series-waiting: #199e70;
+  --series-delivered: #e9ebed;
   --on-light: #15181a;   /* text on a light button */
   --ui: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
   /* B612 Mono (designed for cockpit displays) for the large readings only;
@@ -351,6 +356,36 @@ input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ---------- Indicators page ---------- */
 
+.chart { margin: 0 0 22px; }
+.chart figcaption h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.chart figcaption p { margin: 2px 0 8px; font-size: 12px; color: var(--faint); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 6px; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+.chart-legend li { display: flex; align-items: center; gap: 6px; }
+.chart-legend i { width: 14px; height: 2px; border-radius: 1px; }
+.chart-legend b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart-legend.single i, .chart-legend.single span { display: none; }
+.chart-plot { position: relative; min-height: 150px; }
+.chart-plot svg { display: block; overflow: visible; border-radius: 4px; }
+.chart-plot svg:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.chart .grid line { stroke: var(--line-soft); stroke-width: 1; }
+.chart .grid line.baseline { stroke: var(--line); }
+.chart .grid text { fill: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .dot { stroke: var(--surface); stroke-width: 2; }
+.chart .crosshair line { stroke: var(--muted); stroke-width: 1; }
+.chart-tooltip {
+  position: absolute; top: 6px; display: grid; gap: 2px; padding: 6px 9px; pointer-events: none;
+  font-size: 12px; color: var(--muted); background: var(--raised); border: 1px solid var(--line);
+  border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.chart-tooltip[hidden] { display: none; }
+.chart-tooltip .time { color: var(--faint); }
+.chart-tooltip span:not(.time) { display: flex; align-items: center; gap: 6px; }
+.chart-tooltip i { width: 10px; height: 2px; border-radius: 1px; }
+.chart-tooltip b { color: var(--text); font-variant-numeric: tabular-nums; }
+.chart-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; font-size: 13px; color: var(--faint); }
+.chart-empty[hidden] { display: none; }
+
 .indicator-group { margin-bottom: 22px; }
 .indicator-group h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .indicator-group dl { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-top: 1px solid var(--line-soft); }
@@ -429,6 +464,7 @@ canvas { display: block; touch-action: none; }
 /* Connection lost: the last state received stays visible, dimmed. */
 body[data-connection="disconnected"] .kpis,
 body[data-connection="disconnected"] #counters,
+body[data-connection="disconnected"] #charts,
 body[data-connection="disconnected"] #event-list,
 body[data-connection="disconnected"] #alarm-groups,
 body[data-connection="disconnected"] #panel-body { opacity: 0.45; transition: opacity 300ms; }

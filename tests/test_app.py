@@ -186,16 +186,22 @@ def test_snapshots_follow_start_pause_and_resume():
         receive_until(ws, is_snapshot(0, True))
         # One second at a time: a larger jump would exceed the per-update
         # tick limit and the runner would drop the backlog.
+        samples = []
         for tick in range(20, 160, 20):
             clock.now += 1
             snapshot = receive_until(ws, is_snapshot(tick, True))
+            samples += [sample["tick"] for sample in snapshot["series"]]
         # The first bags arrive at 6.67 s: the same state as an engine stepped
         # directly, bags and counters included.
         engine = Engine(default_layout())
         for _ in range(140):
             engine.step()
-        assert snapshot == snapshot_message(engine, running=True,
-                                            scenario_id="normal").model_dump(mode="json")
+        expected = snapshot_message(engine, running=True, scenario_id="normal").model_dump(mode="json")
+        # The connection received each sample once, in order, one per simulated second.
+        assert samples == [sample["tick"] for sample in expected["series"][1:]] == list(range(20, 160, 20))
+        assert snapshot["series"] == expected["series"][-1:]
+        del snapshot["series"], expected["series"]
+        assert snapshot == expected
         assert snapshot["baggage"]
 
         ws.send_text('{"type": "pause"}')

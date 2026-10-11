@@ -1,6 +1,7 @@
 import { Application } from 'pixi.js';
 import { connect } from './connection.js';
 import { createAlarmList } from './alarms.js';
+import { createCharts } from './charts.js';
 import { createControls } from './controls.js';
 import { createDock } from './dock.js';
 import { createEventLog } from './eventlog.js';
@@ -90,6 +91,16 @@ async function initialize() {
     },
   });
   const eventLog = createEventLog(document.querySelector('.page.events'));
+  const charts = createCharts(document.querySelector('#charts'));
+  // The Indicators page's two views: counters and charts.
+  const statsPage = document.querySelector('.page.stats');
+  const statsTabs = [...statsPage.querySelectorAll('.tabs button')];
+  for (const tab of statsTabs) {
+    tab.addEventListener('click', () => {
+      for (const other of statsTabs) other.setAttribute('aria-pressed', String(other === tab));
+      for (const view of statsPage.querySelectorAll('.view')) view.hidden = view.dataset.view !== tab.dataset.view;
+    });
+  }
   const badge = document.querySelector('#alarms-badge');
   const alarmList = createAlarmList(document.querySelector('.page.alarms'), {
     onCommand: send,
@@ -135,6 +146,7 @@ async function initialize() {
         renderer.setSnapshot(message);
         controls.setSnapshot(message);
         eventLog.setSnapshot(message);
+        charts.setSnapshot(message);
         alarmList.setSnapshot(message, layout);
         plantControls.setSnapshot(message);
         latest = message;

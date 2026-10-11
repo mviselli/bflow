@@ -8,7 +8,7 @@ from bflow.core.events import Alarm, EventLog, Severity
 from bflow.core.layout import LayoutConfig, minimal_layout
 from bflow.core.models import Baggage, Conveyor
 from bflow.core.scenarios import ScheduledAction, check_actions
-from bflow.core.stats import BeltStats, InputStats, OutputStats, Stats
+from bflow.core.stats import BeltStats, InputStats, OutputStats, Sample, Stats
 
 
 STEP_MS = 50
@@ -28,6 +28,10 @@ MOVE_EPSILON_M = 1e-9
 # Resolved alarms kept for the console, the newest ones: the event log keeps
 # the full story.
 MAX_RESOLVED_ALARMS = 20
+# Time series for the charts: one sample every simulated second, the last
+# 10 simulated minutes kept (older samples are dropped).
+SAMPLE_INTERVAL_TICKS = 1000 // STEP_MS
+MAX_SAMPLES = 600
 
 
 class Engine:
@@ -134,6 +138,10 @@ class Engine:
         self.resolved_alarms: deque[Alarm] = deque(maxlen=MAX_RESOLVED_ALARMS)
         self.last_alarm_id = 0
         self._entrance_queued = {node.id: False for node in self.layout.inputs}
+        # One sample per simulated second, from tick 0, oldest first; bounded,
+        # and a new engine (a reset) starts with an empty series.
+        self.series: deque[Sample] = deque(maxlen=MAX_SAMPLES)
+        self.series.append(self._sample())
 
     @property
     def tick(self) -> int:
@@ -381,6 +389,14 @@ class Engine:
         self._update_entrance_queues()
         self._update_congestion()
         self._update_prolonged_waits()
+        if self._tick % SAMPLE_INTERVAL_TICKS == 0:
+            self.series.append(self._sample())
+
+    def _sample(self) -> Sample:
+        return Sample(tick=self.tick, time_s=self.time_s, in_transit=self.in_transit_count,
+                      waiting=self.waiting_count,
+                      correctly_delivered=self.correctly_delivered_count,
+                      misdelivered=self.misdelivered_count, throughput=self.throughput)
 
     def _apply_action(self, action: ScheduledAction) -> None:
         if action.action == "set_arrival_rate":

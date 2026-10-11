@@ -8,6 +8,23 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class Sample:
+    """The plant's main counts at one tick, for the charts (see Engine.series).
+
+    ``throughput`` is the engine's: correct deliveries in the 60 simulated
+    seconds up to this tick.
+    """
+
+    tick: int
+    time_s: float
+    in_transit: int
+    waiting: int
+    correctly_delivered: int
+    misdelivered: int
+    throughput: int
+
+
+@dataclass(frozen=True)
 class BeltStats:
     """How full one belt is. ``capacity`` is the most bags it can hold with the gap."""
 

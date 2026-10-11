@@ -103,7 +103,10 @@ The pages of the side panel:
   (delivered, wrong exits, throughput over the last 60 simulated seconds,
   mean travel time) and alarms (active errors and warnings — the alarms open
   now — then errors and warnings since the start, with what they were); hover
-  over one for its meaning. The strip under the map keeps the key ones in
+  over one for its meaning. The **Charts** tab draws the bags in transit and
+  waiting, and the deliveries per minute, over the last 10 minutes of
+  simulated time; hover over a chart for the values at a time. A reset
+  starts them over. The strip under the map keeps the key ones in
   view, highlighted while they call for attention; click one for more. The
   command-line run prints the same breakdown and the alarms still open at
   the end.

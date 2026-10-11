@@ -128,8 +128,18 @@
           </section>
 
           <section class="page stats" data-page="stats" aria-label="Indicators" hidden>
+            <div class="segmented tabs" role="group" aria-label="Indicators as">
+              <button type="button" data-view="counters" aria-pressed="true">Counters</button>
+              <button type="button" data-view="charts" aria-pressed="false">Charts</button>
+            </div>
             <p id="indicators-note" class="page-note"></p>
-            <div id="counters"></div>
+            <div class="view" data-view="counters">
+              <div id="counters"></div>
+            </div>
+            <div class="view" data-view="charts" hidden>
+              <p class="page-note">The last 10 minutes of simulated time, one point per simulated second. Hover over a chart, or focus it and use the arrow keys, for the values at a time.</p>
+              <div id="charts"></div>
+            </div>
           </section>
 
           <section class="page legend" data-page="legend" aria-label="Legend and help" hidden>

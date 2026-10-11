@@ -15,7 +15,7 @@ the server sends the ``layout`` (with the scenarios on offer) once, then a ``sna
 about every SNAPSHOT_INTERVAL_S real seconds, while running or paused. Each
 connection remembers the last event it sent, so a snapshot carries only new
 events; a new connection receives the full current state and the recent
-events. Snapshots are built on the same event loop as the runner, whose
+events. Chart samples work the same way, by tick. Snapshots are built on the same event loop as the runner, whose
 updates never yield midway, so they never show a half-applied group of ticks.
 
 At the same time the browser sends commands as JSON. A command is
@@ -138,17 +138,23 @@ def _serve_frontend(app: FastAPI, frontend_dir: Path) -> None:
 async def _send_snapshots(websocket: WebSocket, runner: Runner) -> None:
     engine = runner.engine
     last_event_id = 0
+    last_sample_tick = -1
     while True:
-        # After a reset the new engine numbers its events from 1 again.
+        # After a reset the new engine numbers its events from 1 again and
+        # samples from tick 0.
         if runner.engine is not engine:
             engine = runner.engine
             last_event_id = 0
+            last_sample_tick = -1
         snapshot = snapshot_message(engine, running=runner.running, speed=runner.speed,
                                     run=runner.run_number, scenario_id=runner.scenario_id,
-                                    after_event_id=last_event_id)
+                                    after_event_id=last_event_id,
+                                    after_sample_tick=last_sample_tick)
         await websocket.send_text(snapshot.model_dump_json())
         if snapshot.events:
             last_event_id = snapshot.events[-1].id
+        if snapshot.series:
+            last_sample_tick = snapshot.series[-1].tick
         await asyncio.sleep(SNAPSHOT_INTERVAL_S)
 
 
