@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from bflow import cli
 from bflow.core.engine import Engine
 from bflow.core.layout import default_layout, minimal_layout
 from bflow.core.models import Baggage
@@ -12,7 +13,7 @@ from bflow.server import runner as runner_module
 from bflow.server.protocol import (
     AcknowledgeAlarmCommand, FaultBeltCommand, ForceMissortCommand, PauseCommand, RepairBeltCommand, ResetCommand,
     RestartBeltCommand, SetMissortProbabilityCommand, SetRateCommand, SetSpeedCommand,
-    StartCommand, StopBeltCommand, snapshot_message,
+    SPEEDS, StartCommand, StopBeltCommand, snapshot_message,
 )
 from bflow.server.runner import MAX_RECORDED_COMMANDS, MAX_TICKS_PER_UPDATE, Runner, apply_to_engine
 
@@ -192,7 +193,7 @@ def test_a_new_speed_applies_from_the_moment_it_is_set():
 def test_the_same_commands_give_the_same_run_at_any_speed():
     # Commands at the same ticks, but at different real times.
     results = []
-    for factor in (1, 5):
+    for factor in SPEEDS:
         runner, clock = make_runner()
         runner.submit(speed(factor))
         runner.submit(START)
@@ -223,7 +224,7 @@ def test_the_same_commands_give_the_same_run_at_any_speed():
     stats = results[0][0]
     assert (stats.faults, stats.wrong_sortings, stats.misdelivered) == (1, 1, 1)
     assert stats.prolonged_waits > 0 and stats.congestions > 0
-    assert results[0] == results[1]
+    assert results[0] == results[1] == results[2]
 
 
 def test_reset_restores_a_fresh_paused_engine_with_the_same_layout_and_seed():
@@ -327,6 +328,39 @@ def test_after_selecting_a_scenario_the_run_is_the_scenario_itself(name):
         direct.step()
     assert runner.engine.tick == 1600
     assert runner.engine.stats() == direct.stats()
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_the_cli_prints_the_same_summary_as_the_server_engine_after_the_same_steps(name, capsys):
+    # The server at 5×, paced by real time, and the CLI stepping as fast as it can.
+    runner, clock = make_runner()
+    runner.submit(ResetCommand(type="reset", scenario_id=name))
+    runner.submit(speed(5))
+    runner.submit(START)
+    runner.update()
+    while runner.engine.tick < 6000:
+        clock.now += 0.15
+        runner.update()
+    assert runner.engine.tick == 6000
+    assert cli.main(["--scenario", name, "--duration", "300"]) == 0
+    scenario = SCENARIOS[name]
+    assert capsys.readouterr().out.strip() == cli.format_summary(
+        runner.engine.stats(), scenario.seed, scenario_id=name)
+
+
+def test_the_cli_wrong_sorting_option_matches_the_same_command_sent_to_the_server(capsys):
+    runner, clock = make_runner()
+    runner.submit(SetMissortProbabilityCommand(type="set_missort_probability", probability=0.1))
+    runner.submit(START)
+    runner.update()
+    while runner.engine.tick < 2400:
+        clock.now += 0.5
+        runner.update()
+    assert cli.main(["--scenario", "normal", "--duration", "120", "--missort-probability", "0.1"]) == 0
+    stats = runner.engine.stats()
+    assert stats.wrong_sortings > 0
+    assert capsys.readouterr().out.strip() == cli.format_summary(
+        stats, runner.engine.seed, missort_probability=0.1, scenario_id="normal")
 
 
 def test_an_unknown_scenario_is_refused_and_the_run_goes_on():
