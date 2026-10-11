@@ -135,9 +135,12 @@ class PlantChecker:
                     limit = 0 if belt_id in self.halted else conveyor.config.speed_m_s * STEP_SECONDS
                     assert -EPSILON <= moved <= limit + EPSILON, bag
                 else:
-                    # One hop along the plant, to the belt chosen for this bag.
+                    # One hop along the plant, to the belt chosen for this bag,
+                    # once it reached the end of its belt (moving there this tick).
                     previous = engine.conveyors[before[0]]
                     assert previous.config.id not in self.halted
+                    reach = before[1] + previous.config.speed_m_s * STEP_SECONDS
+                    assert reach >= previous.config.length_m - bag.length_m - EPSILON, bag
                     assert engine._next_conveyor(previous, bag) is conveyor
                     assert bag.position_m == 0
                     entered.setdefault(belt_id, []).append((bag, previous))
@@ -413,6 +416,12 @@ SCENARIOS = {
         4200: ("restart_belt", "branch-2")}, 12000),
     "demo: forced errors": (default_layout(), {
         1000: ("force_missort",), 1001: ("force_missort",), 3000: ("force_missort",)}, 6000),
+    # Everything at once, with the plant congested from the start.
+    "demo: saturated desks, wrong sorting 10 %, line 3 faulty and branch 1 stopped": (
+        with_rates(1, default_layout()), {
+            0: ("set_missort_probability", 0.1), 2000: ("fault_belt", "line-3"),
+            2100: ("acknowledge_alarm", 1), 3000: ("stop_belt", "branch-1"),
+            4000: ("restart_belt", "branch-1"), 5000: ("repair_belt", "line-3")}, 12000),
 }
 
 
@@ -461,6 +470,24 @@ def test_saturated_inputs_leave_queues_at_every_input_and_full_feeders():
     assert all(node.waiting > 0 for node in stats.inputs)
     feeders = [belt for belt in stats.belts if belt.belt_id.startswith("feeder")]
     assert all(belt.occupancy >= 0.8 for belt in feeders)
+
+
+@pytest.mark.parametrize("name", ["saturated inputs", "demo: saturated desks"])
+def test_saturated_plants_congest_and_still_keep_every_rule(name):
+    checker = run_checked(*SCENARIOS[name])
+    assert checker.event_counts["congestion_started"] > 0
+    assert checker.engine.stats().active_warnings > 0
+
+
+def test_a_congested_plant_with_faults_stops_and_sorting_errors_keeps_every_rule():
+    checker = run_checked(*SCENARIOS[
+        "demo: saturated desks, wrong sorting 10 %, line 3 faulty and branch 1 stopped"])
+    stats = checker.engine.stats()
+    for kind in ("belt_fault", "belt_repaired", "congestion_started", "prolonged_wait_started",
+                 "prolonged_wait_resolved", "wrong_sorting", "wrong_exit", "alarm_acknowledged"):
+        assert checker.event_counts[kind] > 0, kind
+    assert (stats.faults, stats.active_errors) == (1, 0)
+    assert all(node.waiting > 0 for node in stats.inputs)
 
 
 def test_the_demo_plant_below_capacity_serves_every_output_with_no_queue():
@@ -681,9 +708,34 @@ def impatient_congestion(engine):
     engine._update_congestion = sooner
 
 
+def early_handover(engine):
+    """A bag up to 20 cm before the end of its belt already moves to the next one."""
+    evaluate = engine._evaluate_transfers
+
+    def sooner():
+        ready = evaluate()
+        early = []
+        for conveyor in engine.conveyors.values():
+            if conveyor in ready or conveyor.halted or not conveyor.baggage:
+                continue
+            bag = conveyor.baggage[-1]
+            next_conveyor = engine._next_conveyor(conveyor, bag)
+            if (bag.position_m >= conveyor.config.length_m - bag.length_m - 0.2
+                    and next_conveyor is not None and engine._has_entry_space(next_conveyor, bag)):
+                early.append(conveyor)
+        return ready + tuple(early)
+    engine._evaluate_transfers = sooner
+
+
+def cramped_entrance(engine):
+    """A bag enters a belt as soon as the bag ahead has moved off position zero, without the gap."""
+    engine._has_entry_space = lambda conveyor, baggage: (not conveyor.baggage
+                                                         or conveyor.baggage[0].position_m >= baggage.length_m)
+
+
 @pytest.mark.parametrize("sabotage", [unfair_merge, lazy_feeder, lazy_admission, wrong_branch,
                                       error_counted_twice, sorter_changes_its_mind,
-                                      impatient_congestion])
+                                      impatient_congestion, early_handover, cramped_entrance])
 def test_the_checker_notices_a_broken_rule(sabotage):
     engine = Engine(with_rates(1))
     checker = PlantChecker(engine)
