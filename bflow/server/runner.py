@@ -5,7 +5,7 @@ engine: web handlers only put commands in the queue. At every update the
 runner first applies all pending commands, then runs the ticks that real
 time says are due, in a limited group, and returns control to the server.
 The speed multiplies the ticks due per real second; reset replaces the
-engine with a new one built from the same layout and seed.
+engine with a new one built from the same layout, seed and scheduled actions.
 
 Every applied command is recorded with the tick it was applied at: it takes
 effect from the next step, tick + 1. Replaying the recorded commands at the
@@ -130,7 +130,8 @@ class Runner:
                 and command.alarm_id > self.engine.last_alarm_id):
             return
         if isinstance(command, ResetCommand):
-            self.engine = Engine(self.engine.layout, seed=self.engine.seed)
+            self.engine = Engine(self.engine.layout, seed=self.engine.seed,
+                                 actions=self.engine.actions)
             self.running = False
             self.run_number += 1
             self.record.clear()

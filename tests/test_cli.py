@@ -5,6 +5,7 @@ import pytest
 from bflow import cli
 from bflow.core.engine import Engine
 from bflow.core.layout import default_layout, minimal_layout
+from bflow.core.scenarios import SCENARIOS
 
 
 def test_default_run_is_the_full_plant_for_600_seconds_and_is_conserved(capsys):
@@ -71,6 +72,37 @@ def test_the_summary_separates_occurrences_from_the_alarms_still_open():
             f"prolonged wait {stats.prolonged_waits})") in lines
     assert stats.warnings > 0 and stats.active_warnings > 0
     assert f"Active alarms:       errors 1, warnings {stats.active_warnings}" in lines
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_a_scenario_runs_its_layout_seed_and_actions(name, capsys):
+    assert cli.main(["--duration", "90", "--scenario", name]) == 0
+    scenario = SCENARIOS[name]
+    engine = Engine(scenario.layout, seed=scenario.seed, actions=scenario.actions)
+    for _ in range(1800):
+        engine.step()
+    out = capsys.readouterr().out
+    assert out.strip() == cli.format_summary(engine.stats(), scenario.seed, scenario_id=name)
+    assert f"Scenario {name} · seed {scenario.seed} · 90.00 simulated s" in out
+
+
+def test_the_seed_option_overrides_the_scenario_seed(capsys):
+    assert cli.main(["--duration", "60", "--scenario", "peak", "--seed", "7"]) == 0
+    assert "Scenario peak · seed 7 · " in capsys.readouterr().out
+
+
+def test_the_fault_scenario_shows_its_fault_still_open(capsys):
+    assert cli.main(["--duration", "120", "--scenario", "fault"]) == 0
+    out = capsys.readouterr().out
+    assert "Errors:              1 (faults 1, wrong sorting 0)" in out
+    assert "Active alarms:       errors 1, " in out
+
+
+def test_a_scenario_and_a_layout_cannot_be_combined(capsys):
+    with pytest.raises(SystemExit) as error:
+        cli.main(["--scenario", "peak", "--layout", "minimal"])
+    assert error.value.code == 2
+    assert "not allowed with" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("probability", ["-0.1", "1.5", "lots"])

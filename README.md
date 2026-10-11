@@ -141,11 +141,25 @@ throughput, and figures for each check-in desk, output and belt.
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `--duration` | simulated seconds (multiple of 0.05) | `600` |
-| `--seed` | random seed; the same seed gives the same run | `42` |
+| `--seed` | random seed; the same seed gives the same run | the scenario's, else `42` |
 | `--layout` | `full` plant or `minimal` single belt | `full` |
+| `--scenario` | a ready scenario of the full plant (see below); not combined with `--layout` | none |
 | `--missort-probability` | chance (0–1) that a sorter sends a bag down a wrong branch; each error counts once in Errors and the bag ends as a wrong exit | `0` |
 
 The command exits with status 1 if bags are lost or duplicated.
+
+Ready scenarios run the full plant with actions at known times, the same
+on every run:
+
+| Scenario | What happens |
+| --- | --- |
+| `normal` | each desk checks in 0.15 bags/s, below what the sort line can carry: no queues, no warnings |
+| `peak` | from 60 s to 180 s every desk checks in 0.3 bags/s, more than the line can carry: queues grow at the desks farthest from the line, then clear |
+| `fault` | line 2 breaks down at 60 s and stays faulty until repaired: the whole plant backs up behind it |
+
+```sh
+uv run python -m bflow.cli --scenario peak
+```
 
 ## Tests
 

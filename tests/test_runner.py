@@ -7,6 +7,7 @@ import pytest
 from bflow.core.engine import Engine
 from bflow.core.layout import default_layout, minimal_layout
 from bflow.core.models import Baggage
+from bflow.core.scenarios import fault_scenario
 from bflow.server import runner as runner_module
 from bflow.server.protocol import (
     AcknowledgeAlarmCommand, FaultBeltCommand, ForceMissortCommand, PauseCommand, RepairBeltCommand, ResetCommand,
@@ -252,6 +253,26 @@ def test_reset_restores_a_fresh_paused_engine_with_the_same_layout_and_seed():
     for _ in range(runner.engine.tick):
         fresh.step()
     assert runner.engine.stats() == fresh.stats()
+
+
+def test_reset_keeps_the_scheduled_actions_and_replays_them():
+    scenario = fault_scenario()
+    clock = FakeClock()
+    runner = Runner(Engine(scenario.layout, seed=scenario.seed, actions=scenario.actions),
+                    clock=clock)
+    runner.submit(START)
+    runner.update()
+    for _ in range(70):
+        clock.now += 1
+        runner.update()
+    assert runner.engine.conveyors["line-2"].faulty
+    runner.submit(ResetCommand(type="reset"))
+    runner.update()
+    assert runner.engine.actions == scenario.actions
+    assert not runner.engine.conveyors["line-2"].faulty
+    for _ in range(1201):
+        runner.engine.step()
+    assert runner.engine.conveyors["line-2"].faulty
 
 
 def test_belt_and_rate_commands_reach_the_engine():

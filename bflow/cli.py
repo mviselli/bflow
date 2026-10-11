@@ -3,6 +3,7 @@
     uv run python -m bflow.cli --duration 600 --seed 42
     uv run python -m bflow.cli --layout minimal   # the one-belt route of the page
     uv run python -m bflow.cli --missort-probability 0.05   # with sorting errors
+    uv run python -m bflow.cli --scenario peak   # a ready scenario: normal, peak, fault
 
 Uses the same engine as the server and steps as fast as possible, without
 waiting for real time. Exits with status 1 if baggage conservation fails.
@@ -12,6 +13,7 @@ import argparse
 
 from bflow.core.engine import STEP_MS, Engine
 from bflow.core.layout import default_layout, minimal_layout
+from bflow.core.scenarios import SCENARIOS
 from bflow.core.stats import Stats
 
 
@@ -50,11 +52,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--duration", type=_duration_ticks, default=_duration_ticks("600"),
                         metavar="SECONDS", help="duration in simulated seconds (default: 600)")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="random generator seed (default: 42)")
-    parser.add_argument("--layout", choices=LAYOUTS, default="full",
-                        help="full: six desks in two islands, one sort line, four outputs; "
-                             "minimal: one belt (default: full)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="random generator seed (default: the scenario's, else 42)")
+    plant = parser.add_mutually_exclusive_group()
+    plant.add_argument("--layout", choices=LAYOUTS, default="full",
+                       help="full: six desks in two islands, one sort line, four outputs; "
+                            "minimal: one belt (default: full)")
+    plant.add_argument("--scenario", choices=SCENARIOS,
+                       help="a ready run of the full plant with actions at known times: "
+                            + "; ".join(f"{scenario.id}: {scenario.title.lower()}"
+                                        for scenario in SCENARIOS.values()))
     parser.add_argument("--missort-probability", type=_probability, default=0.0, metavar="P",
                         help="chance that a sorter sends a bag down a wrong branch, "
                              "from 0 to 1 (default: 0)")
@@ -62,13 +69,14 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def format_summary(stats: Stats, seed: int, layout_name: str = "full",
-                   missort_probability: float = 0.0) -> str:
+                   missort_probability: float = 0.0, scenario_id: str | None = None) -> str:
     """The totals, then one line per input, output and belt, as the engine counted them.
 
     Errors and warnings are occurrences since the start, by kind; the active
     alarms are the conditions still open at the end of the run.
 
-    The wrong sorting probability is shown in the header only when it is set.
+    The header names the scenario if there is one, else the layout; the
+    wrong sorting probability is shown only when it is set.
     """
     mean = "—" if stats.mean_travel_time_s is None else f"{stats.mean_travel_time_s:.2f} s"
     conservation = "OK" if stats.is_conserved else "FAILED"
@@ -94,7 +102,8 @@ def format_summary(stats: Stats, seed: int, layout_name: str = "full",
                    + [belt.belt_id for belt in stats.belts])
     lines = [
         "BaggageFlow — run summary",
-        f"Layout {layout_name} · seed {seed} · "
+        (f"Scenario {scenario_id}" if scenario_id else f"Layout {layout_name}")
+        + f" · seed {seed} · "
         + (f"wrong sorting {missort_probability:g} · " if missort_probability else "")
         + f"{stats.time_s:.2f} simulated s "
         f"({stats.tick} ticks)",
@@ -121,12 +130,18 @@ def format_summary(stats: Stats, seed: int, layout_name: str = "full",
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    engine = Engine(LAYOUTS[args.layout](), seed=args.seed)
+    if args.scenario:
+        scenario = SCENARIOS[args.scenario]
+        seed = scenario.seed if args.seed is None else args.seed
+        engine = Engine(scenario.layout, seed=seed, actions=scenario.actions)
+    else:
+        seed = 42 if args.seed is None else args.seed
+        engine = Engine(LAYOUTS[args.layout](), seed=seed)
     engine.set_missort_probability(args.missort_probability)
     for _ in range(args.duration):
         engine.step()
     stats = engine.stats()
-    print(format_summary(stats, args.seed, args.layout, args.missort_probability))
+    print(format_summary(stats, seed, args.layout, args.missort_probability, args.scenario))
     return 0 if stats.is_conserved else 1
 
 

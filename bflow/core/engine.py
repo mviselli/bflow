@@ -7,6 +7,7 @@ from bflow.core.checks import check_quantity
 from bflow.core.events import Alarm, EventLog, Severity
 from bflow.core.layout import LayoutConfig, minimal_layout
 from bflow.core.models import Baggage, Conveyor
+from bflow.core.scenarios import ScheduledAction, check_actions
 from bflow.core.stats import BeltStats, InputStats, OutputStats, Stats
 
 
@@ -42,15 +43,26 @@ class Engine:
     random module: the same seed and the same operations reproduce the run
     with no interference between instances. Without a layout the engine runs
     the one-belt minimal route.
+
+    ``actions`` are a scenario's commands at known ticks (see scenarios.py):
+    each one is applied at the start of the step after its tick, like an
+    operator command sent then.
     """
 
-    def __init__(self, layout: LayoutConfig | None = None, *, seed: int = 42) -> None:
+    def __init__(self, layout: LayoutConfig | None = None, *, seed: int = 42,
+                 actions: tuple[ScheduledAction, ...] = ()) -> None:
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise ValueError("seed must be an integer")
         self.layout = layout if layout is not None else minimal_layout()
         self.seed = seed
         self.rng = Random(seed)
         self._tick = 0
+        check_actions(self.layout, actions)
+        self.actions = tuple(actions)
+        # The same actions grouped by tick, in their order.
+        self._actions_at: dict[int, list[ScheduledAction]] = {}
+        for action in self.actions:
+            self._actions_at.setdefault(action.tick, []).append(action)
         # One state per belt, in layout order.
         self.conveyors = {belt.id: Conveyor(belt) for belt in self.layout.belts}
         # Most bags each belt can hold: n bags need n lengths and n - 1 gaps.
@@ -350,7 +362,14 @@ class Engine:
                            element_id=element_id, baggage_id=baggage_id, alarm_id=alarm.id)
 
     def step(self) -> None:
-        """Completes one fixed step without reading real time or waiting."""
+        """Completes one fixed step without reading real time or waiting.
+
+        The scheduled actions of the current tick come first, after any
+        command the caller applied between steps, and before the tick moves
+        on: their events carry this tick, like a command's.
+        """
+        for action in self._actions_at.get(self._tick, ()):
+            self._apply_action(action)
         self._tick += 1
         self._move()
         self._sort()
@@ -362,6 +381,13 @@ class Engine:
         self._update_entrance_queues()
         self._update_congestion()
         self._update_prolonged_waits()
+
+    def _apply_action(self, action: ScheduledAction) -> None:
+        if action.action == "set_arrival_rate":
+            self.set_arrival_rate(action.target_id, action.value)
+        else:
+            # stop_belt, restart_belt, fault_belt or repair_belt.
+            getattr(self, action.action)(action.target_id)
 
     def _move(self) -> None:
         """Advances each running belt from the exit towards the entrance.
