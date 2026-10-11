@@ -177,6 +177,18 @@ uv run pytest
 npm --prefix frontend test
 ```
 
+`uv run pytest` also runs a few browser tests (`tests/e2e/`): they open the
+built page in a headless Chromium and check start, pause, resume, reset and
+a fault with its repair. They need a build and the browser, once:
+
+```sh
+npm --prefix frontend run build
+uv run playwright install chromium
+```
+
+Without them the browser tests are skipped. To run only them:
+`uv run pytest tests/e2e` (add `--headed` to watch).
+
 Manual browser checks are listed in [docs/manual-checklist.md](docs/manual-checklist.md).
 
 ## Project layout
@@ -185,7 +197,7 @@ Manual browser checks are listed in [docs/manual-checklist.md](docs/manual-check
 bflow/core/     simulation engine (no server or graphics)
 bflow/server/   FastAPI server and WebSocket
 frontend/       PixiJS page (Vite)
-tests/          Python tests
+tests/          Python tests (tests/e2e/: browser tests)
 ```
 
 ## License
