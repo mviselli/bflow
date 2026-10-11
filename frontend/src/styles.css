@@ -208,6 +208,7 @@ button svg, .icon-button svg { width: 18px; height: 18px; fill: none; stroke: cu
 #panel dt { color: var(--muted); font-size: 14px; padding-right: 16px; }
 #panel dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 #panel dd.alert { color: var(--warn); font-weight: 600; }
+#panel dd.alert[data-severity="error"] { color: var(--fault); }
 #panel[data-state="stopped"] dd:first-of-type { color: var(--stop); font-weight: 600; }
 #panel[data-state="faulty"] dd:first-of-type { color: var(--fault); font-weight: 600; }
 #panel[data-state="missorted"] dd:nth-of-type(2) { color: var(--fault); font-weight: 600; }

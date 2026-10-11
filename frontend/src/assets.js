@@ -198,9 +198,15 @@ export function surfaceSpan(belt, ends) {
 // Floor tiles over the visible area. Each tile's shade and grain come from
 // its own position on the map, so the floor looks the same whatever part of
 // it is drawn (after zooming or panning).
-function drawTiles(ctx, view) {
+// Below this size on screen (device pixels) a tile gets fewer grain dots, in
+// proportion to its area: the dots are finer than a pixel there, and a large
+// plant seen whole has tens of thousands of tiles to redraw.
+const GRAIN_FULL_TILE_PX = 32;
+
+function drawTiles(ctx, view, scale) {
   const tile = 0.6;
   const grout = 0.012;
+  const grains = Math.round(tile * tile * 350 * Math.min(1, (tile * scale / GRAIN_FULL_TILE_PX) ** 2));
   ctx.fillStyle = '#12171c';
   ctx.fillRect(view.left, view.top, view.width, view.height);
   const firstColumn = Math.floor(view.left / tile);
@@ -211,8 +217,7 @@ function drawTiles(ctx, view) {
       const lightness = 15 + random() * 4;
       ctx.fillStyle = `hsl(210, 12%, ${lightness}%)`;
       ctx.fillRect(column * tile + grout / 2, row * tile + grout / 2, tile - grout, tile - grout);
-      grain(ctx, random, column * tile, row * tile, tile, tile,
-        Math.round(tile * tile * 350), 0.012, 0.12);
+      grain(ctx, random, column * tile, row * tile, tile, tile, grains, 0.012, 0.12);
     }
   }
 }
@@ -509,7 +514,7 @@ export function floorCanvas({ geometry, layout, screenWidth, screenHeight, resol
   const firstBelt = new Map(layout.belts.map((belt) => [belt.source_id, belt]));
   const lastBelt = new Map(layout.belts.map((belt) => [belt.target_id, belt]));
 
-  drawTiles(ctx, view);
+  drawTiles(ctx, view, scale);
   for (const belt of layout.belts) drawDirectionArrows(ctx, belt);
   drawBeltShadows(ctx, scale, layout, ends, joints);
   for (const input of layout.inputs) {

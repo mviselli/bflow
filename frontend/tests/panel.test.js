@@ -72,7 +72,7 @@ test('nothing selected shows a summary of the plant; its commands are on the Con
   assert.equal(content.action, undefined);
   const forced = panelContent(null, LAYOUT, snapshot({ forced: true }));
   assert.equal(values(forced)['Forced error'], 'On the next bag sorted');
-  assert.equal(forced.rows[1].alert, true);
+  assert.equal(forced.rows[1].alert, 'warning');
   // Before the first snapshot: the plant without values.
   const early = panelContent(null, LAYOUT, null);
   assert.equal(values(early)['Wrong sorting'], '—');
@@ -100,7 +100,7 @@ test('a stopped belt says so', () => {
 test('a congested belt shows the warning, highlighted', () => {
   const content = panelContent({ kind: 'belt', id: 'line' }, LAYOUT, snapshot({ congested: true, bags: 6 }));
   const row = content.rows.find((item) => item.label === 'Congestion');
-  assert.deepEqual(row, { label: 'Congestion', value: 'Warning · was above 80 % for 10 s', alert: true });
+  assert.deepEqual(row, { label: 'Congestion', value: 'Warning · was above 80 % for 10 s', alert: 'warning' });
   assert.equal(values(content).State, 'Running');
 });
 
@@ -127,12 +127,16 @@ test('a belt lists its open alarms with their state and age, highlighted until a
   assert.deepEqual(content.rows.find((row) => row.label === 'Alarms'), {
     label: 'Alarms',
     value: 'Fault · acknowledged · open for 12.0 s; Congestion · active · open for 4.5 s',
-    alert: true,
+    alert: 'warning',
   });
+  // An active fault highlights the row in the fault's colour.
+  const broken = panelContent({ kind: 'belt', id: 'line' }, LAYOUT,
+    snapshot({ faulty: true, alarms: [alarm(1, 'belt_fault', 'active'), alarms[1]] }));
+  assert.equal(broken.rows.find((row) => row.label === 'Alarms').alert, 'error');
   // Acknowledged only: still listed, no longer highlighted; the belt is still faulty.
   const seen = panelContent({ kind: 'belt', id: 'line' }, LAYOUT,
     snapshot({ faulty: true, alarms: [alarms[0]] }));
-  assert.equal(seen.rows.find((row) => row.label === 'Alarms').alert, false);
+  assert.equal(seen.rows.find((row) => row.label === 'Alarms').alert, null);
   assert.equal(values(seen).State, 'Faulty · needs repair');
 });
 
@@ -174,7 +178,7 @@ test('a missorted bag shows where the sorting error sent it', () => {
 test('a bag in a prolonged wait shows how long it has been still, highlighted', () => {
   const content = panelContent({ kind: 'bag', id: 'bag-7' }, LAYOUT, snapshot({ waiting: true }));
   assert.deepEqual(content.rows.at(-1), {
-    label: 'Prolonged wait', value: 'Warning · not moved for 6.3 s', alert: true,
+    label: 'Prolonged wait', value: 'Warning · not moved for 6.3 s', alert: 'warning',
   });
   const moving = panelContent({ kind: 'bag', id: 'bag-7' }, LAYOUT, snapshot());
   assert.ok(!moving.rows.some((row) => row.label === 'Prolonged wait'));

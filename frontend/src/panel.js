@@ -46,6 +46,14 @@ export function alarmText(alarm, timeS) {
   return `${name} · ${alarm.state} · open for ${(timeS - alarm.raised_at_s).toFixed(1)} s`;
 }
 
+// How a row of alarms is highlighted: 'error' while an active one is an
+// error (a fault), 'warning' while only warnings are active, else null.
+function alarmAlert(alarms) {
+  const active = alarms.filter((alarm) => alarm.state === 'active');
+  if (active.some((alarm) => alarm.severity === 'error')) return 'error';
+  return active.length > 0 ? 'warning' : null;
+}
+
 // The open alarms (active or acknowledged) of a belt itself, or of a bag.
 function openAlarms(snapshot, { beltId = null, bagId = null }) {
   return (snapshot?.alarms ?? []).filter((alarm) => alarm.state !== 'resolved'
@@ -71,13 +79,13 @@ function beltContent(id, layout, snapshot) {
     {
       label: 'Congestion',
       value: !state ? '—' : state.congested ? 'Warning · was above 80 % for 10 s' : 'None',
-      alert: Boolean(state?.congested),
+      alert: state?.congested ? 'warning' : null,
     },
     {
       label: 'Alarms',
       value: !snapshot ? '—' : alarms.map((alarm) => alarmText(alarm, snapshot.time_s)).join('; ') || 'None',
-      // Highlighted while one has not been acknowledged.
-      alert: alarms.some((alarm) => alarm.state === 'active'),
+      // Highlighted while one has not been acknowledged: red if it is a fault.
+      alert: alarmAlert(alarms),
     },
     { label: 'Bags', value: stats ? `${stats.bags} of ${stats.capacity}` : '—' },
     { label: 'Occupancy', value: stats ? `${Math.round(stats.occupancy * 100)} %` : '—' },
@@ -133,7 +141,7 @@ function bagContent(id, layout, snapshot, destinations) {
       label: 'Prolonged wait',
       value: `Warning · not moved for ${(snapshot.time_s - baggage.moved_at_s).toFixed(1)} s`
         + (acknowledged ? ' · acknowledged' : ''),
-      alert: true,
+      alert: 'warning',
     }]
     : [];
   return {
@@ -170,7 +178,7 @@ function plantContent(layout, snapshot) {
       {
         label: 'Forced error',
         value: !snapshot ? '—' : snapshot.missort_forced ? 'On the next bag sorted' : 'None',
-        alert: Boolean(snapshot?.missort_forced),
+        alert: snapshot?.missort_forced ? 'warning' : null,
       },
       {
         label: 'Open alarms',
@@ -325,7 +333,10 @@ export function createPanel(element, { onCommand = () => {} } = {}) {
         const detail = document.createElement('dd');
         term.textContent = label;
         detail.textContent = value;
-        if (alert) detail.className = 'alert';
+        if (alert) {
+          detail.className = 'alert';
+          detail.dataset.severity = alert;
+        }
         list.append(term, detail);
       }
       body.append(list);
