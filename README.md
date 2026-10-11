@@ -6,28 +6,41 @@ browser view built with PixiJS.
 The engine models a small airport plant: six check-in desks in two islands,
 whose belts join one sort line, and three diverts along the line that send
 each bag to one of four flights. Bags arrive at each desk, take turns wherever
-two belts merge and are sorted to their destination. Belts can be stopped and
-restarted. The browser shows the whole plant; the command line runs it
+two belts merge and are sorted to their destination. You can stop a belt,
+break it and repair it, change how many bags arrive, cause sorting errors and
+watch the queues, alarms and statistics react. The browser shows the whole
+plant as a control console; the command line runs the same simulation
 without the browser.
+
+![A belt fault at 5×: line 2 breaks down, the plant backs up to the desks, the operator repairs it and the backlog clears](docs/images/demo.gif)
 
 ## Requirements
 
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) (installs Python automatically)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/), which
+  installs Python 3.12 or later automatically if needed
 - Node.js 22.12+ or 24+, with npm
-- A desktop browser with WebGL
+- A recent desktop browser with WebGL (developed with Chrome on macOS)
 
 Node.js is needed only to build the page (once, and again after changing the
 frontend) or to develop it; running an existing build needs only uv.
 
 ## Installation
 
+From the project folder:
+
 ```sh
-uv sync --locked
-npm --prefix frontend ci
+uv sync --locked            # Python environment in .venv
+npm --prefix frontend ci    # frontend dependencies in frontend/node_modules
+```
+
+## Build the page
+
+```sh
 npm --prefix frontend run build
 ```
 
-The last command writes the page to `frontend/dist/`.
+This writes the page to `frontend/dist/`. Build again after changing anything
+in `frontend/`; the Python code needs no build.
 
 ## Run
 
@@ -35,12 +48,37 @@ The last command writes the page to `frontend/dist/`.
 uv run uvicorn bflow.server.app:app
 ```
 
-This single process runs the simulation and serves the page: open
+This single process runs the simulation and serves the built page: open
 [http://127.0.0.1:8000](http://127.0.0.1:8000). Stop it with `Ctrl+C`. If the
 page has not been built, the address says how to build it; after building,
-restart the server.
+restart the server. The simulation starts paused at the beginning of the
+normal-traffic scenario; everyone who opens the page sees and controls the
+same simulation.
+
+## Demo: a fault and its recovery
+
+1. Click the scenario name in the top bar and choose **Belt fault**, then
+   **Start** (5× makes it quicker).
+2. At one minute line 2 breaks down: its edges turn to red dashes, the Alarms
+   badge turns red, and selecting the belt shows it faulty with a **Repair
+   belt** button.
+
+   ![Line 2 faulty a few seconds after the breakdown](docs/images/fault-1-breakdown.png)
+
+3. Bags pile up behind it, back to the desks, where passengers queue; the
+   congested belts and the bags stuck for 30 s raise warnings.
+
+   ![Two minutes later: the plant backed up and 88 alarms open](docs/images/fault-2-backlog.png)
+
+4. Select line 2 and click **Repair belt**. The flow resumes and, with demand
+   below what the line can carry, the backlog clears by itself; the charts
+   show the dip and the recovery.
+
+   ![At ten minutes: backlog cleared, no alarms, the charts showing the recovery](docs/images/fault-3-recovered.png)
 
 ## Use
+
+![The plant running normal traffic, with the indicators page open](docs/images/plant.png)
 
 The page fills the window: the simulation controls along the top, the map in
 the middle with the key indicators under it, and a side panel on the left
@@ -191,6 +229,43 @@ Without them the browser tests are skipped. To run only them:
 
 Manual browser checks are listed in [docs/manual-checklist.md](docs/manual-checklist.md).
 
+## Model limits
+
+BaggageFlow is a teaching model, not a replica of a real plant:
+
+- **Fixed plant.** The six desks, two islands, one sort line and four outputs
+  are built in; there is no layout editor, and every bag has exactly one
+  route from its desk to its destination (no recirculation or alternative
+  routes).
+- **Simple movement.** Belts are straight one-dimensional lines at a constant
+  speed that start and stop instantly; there are no physics, acceleration or
+  jams. All bags have the same length and keep a minimum gap; a bag never
+  overtakes the one ahead and waits at the end of its belt while the next
+  one has no room.
+- **Step approximations.** Time advances in fixed 50 ms steps. A bag passing
+  to the next belt moves there whole when its front reaches the end and starts
+  at the beginning of the next belt, so its rear jumps forward by one bag
+  length, and it waits for the next step before moving again. The page
+  animates bags smoothly across the joints, but the counts follow the steps.
+- **Arrivals and destinations.** Each desk sends bags at regular intervals at
+  its rate (0 to 1 bag/s), not at random times; each bag's destination is
+  drawn with equal chance among the four outputs from the seeded random
+  generator. Merges let belts through in turn, and sorters follow each bag's
+  destination unless you set a chance of sorting errors or force one.
+- **No real devices.** There are no label readers, screening, manual stations,
+  flight schedules or priorities, and no connection to real equipment.
+- **Bounded history.** The page keeps the last 10 minutes of chart data and
+  the latest 200 events of each severity; the server keeps the latest 100
+  events, the open alarms and the 20 most recently resolved, and the last
+  10,000 commands of the run.
+- **Real time.** At 2× and 5× the server runs more steps per second, not
+  longer ones. A machine too slow to keep up runs the simulation slower rather
+  than skipping ahead, so results never depend on the speed or the machine.
+  On a MacBook Air (Apple M1) the page stays at 60 frames per second with
+  about 200 bags on screen.
+- **Local, single simulation.** The server listens on this computer only and
+  has no accounts: every open page shares the one simulation.
+
 ## Project layout
 
 ```text
@@ -198,6 +273,7 @@ bflow/core/     simulation engine (no server or graphics)
 bflow/server/   FastAPI server and WebSocket
 frontend/       PixiJS page (Vite)
 tests/          Python tests (tests/e2e/: browser tests)
+docs/           manual browser checklist and the images of this README
 ```
 
 ## License
