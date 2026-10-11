@@ -49,6 +49,7 @@ test('the time axis spans at least a minute, then the samples kept', () => {
   assert.equal(formatMinutes(0), '0:00');
   assert.equal(formatMinutes(90), '1:30');
   assert.equal(formatMinutes(600), '10:00');
+  assert.equal(formatMinutes(59.6), '1:00');
 });
 
 test('the value axis ends at a round number above the data, at least 5', () => {

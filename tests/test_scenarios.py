@@ -186,3 +186,61 @@ def test_scenarios_have_distinct_ids_and_run_the_demo_plant():
     for scenario_id, scenario in SCENARIOS.items():
         assert isinstance(scenario, Scenario) and scenario.id == scenario_id
         assert scenario.layout == default_layout()
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_charts_kpis_and_events_describe_the_same_run(name):
+    # Ten minutes of each scenario. Independently of the engine's counters,
+    # the events are replayed (open queues, faults, warnings) and the bags
+    # leaving the plant are counted; at every sample the chart's values, the
+    # indicators and those two accounts must agree.
+    engine = scenario_engine(SCENARIOS[name])
+    last_event_id = 0
+    open_queues, open_faults, open_warnings = set(), set(), set()
+    by_severity = {"error": 0, "warning": 0}
+    delivered_at = []  # ticks of the correct deliveries
+    wrong_exits = 0
+    samples_checked = 0
+    for _ in range(12000):
+        engine.step()
+        for event in engine.events.since(last_event_id):
+            last_event_id = event.id
+            by_severity[event.severity] = by_severity.get(event.severity, 0) + 1
+            subject = event.baggage_id or event.element_id
+            if event.kind == "entrance_queue_started":
+                open_queues.add(subject)
+            elif event.kind == "entrance_queue_cleared":
+                open_queues.remove(subject)
+            elif event.kind == "belt_fault":
+                open_faults.add(subject)
+            elif event.kind == "belt_repaired":
+                open_faults.remove(subject)
+            elif event.kind in ("congestion_started", "prolonged_wait_started"):
+                open_warnings.add((event.kind, subject))
+            elif event.kind == "congestion_cleared":
+                open_warnings.remove(("congestion_started", subject))
+            elif event.kind == "prolonged_wait_resolved":
+                open_warnings.remove(("prolonged_wait_started", subject))
+        for bag in engine.exited_this_tick:
+            if bag.missorted_to_id is None:
+                delivered_at.append(engine.tick)
+            else:
+                wrong_exits += 1
+        sample, stats = engine.series[-1], engine.stats()
+        if sample.tick != engine.tick:
+            continue
+        samples_checked += 1
+        # The chart's point is the indicators at the same tick.
+        assert (sample.time_s, sample.in_transit, sample.waiting, sample.correctly_delivered,
+                sample.misdelivered, sample.throughput) == (
+            stats.time_s, stats.in_transit, stats.waiting, stats.correctly_delivered,
+            stats.misdelivered, stats.throughput)
+        # ... and what the events and the exits say happened.
+        assert (sample.waiting > 0) == bool(open_queues)
+        assert {node.input_id for node in stats.inputs if node.waiting} == open_queues
+        assert sample.correctly_delivered == len(delivered_at)
+        assert sample.misdelivered == wrong_exits
+        assert sample.throughput == sum(tick > engine.tick - 1200 for tick in delivered_at)
+        assert (stats.active_errors, stats.active_warnings) == (len(open_faults), len(open_warnings))
+        assert (stats.errors, stats.warnings) == (by_severity["error"], by_severity["warning"])
+    assert samples_checked == 600

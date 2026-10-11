@@ -91,8 +91,9 @@ export function timeTicks(start, end, count = 5) {
 
 // "1:30" for 90 simulated seconds.
 export function formatMinutes(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(Math.round(seconds - minutes * 60)).padStart(2, '0')}`;
+  const whole = Math.round(seconds);
+  const minutes = Math.floor(whole / 60);
+  return `${minutes}:${String(whole - minutes * 60).padStart(2, '0')}`;
 }
 
 // The sample nearest to a time, or null without samples.
@@ -147,6 +148,11 @@ function chartFigure(chart) {
     legend.append(item);
     latest[line.key] = value;
   }
+  // The legend's values are the last sample's, up to a second older than
+  // the indicators of the newest snapshot: say when they were taken.
+  const at = document.createElement('li');
+  at.className = 'at';
+  legend.append(at);
   // A single line needs no legend box: the title names it; keep its value.
   if (chart.lines.length === 1) legend.classList.add('single');
   head.append(legend);
@@ -163,13 +169,14 @@ function chartFigure(chart) {
   empty.textContent = 'Start the simulation to draw the chart.';
   plot.append(empty);
   figure.append(head, plot);
-  return { chart, figure, svg, tooltip, empty, latest, hover: null };
+  return { chart, figure, svg, tooltip, empty, latest, at, hover: null };
 }
 
 function draw(part, samples) {
-  const { chart, svg, tooltip, empty, latest } = part;
+  const { chart, svg, tooltip, empty, latest, at } = part;
   const width = svg.parentElement.clientWidth;
   for (const line of chart.lines) latest[line.key].textContent = samples.length ? String(samples.at(-1)[line.key]) : '—';
+  at.textContent = samples.length ? `at ${formatMinutes(samples.at(-1).time_s)}` : '';
   empty.hidden = samples.length > 1;
   svg.replaceChildren();
   if (width === 0 || samples.length < 2) {
