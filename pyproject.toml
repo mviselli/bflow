@@ -14,6 +14,10 @@ dependencies = [
     "uvicorn[standard]>=0.34,<1",
 ]
 
+[project.scripts]
+# Builds the page if needed, starts the server and opens the browser.
+baggageflow = "bflow.launch:main"
+
 [dependency-groups]
 dev = [
     "httpx2>=2.13,<3",

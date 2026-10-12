@@ -15,6 +15,26 @@ without the browser.
 
 ![A belt fault at 5×: line 2 breaks down, the plant backs up to the desks, the operator repairs it and the backlog clears](docs/images/demo.gif)
 
+## Quick start
+
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and
+   [Node.js](https://nodejs.org) (22.12+ or 24+).
+2. Double-click **BaggageFlow.command** (macOS) or **BaggageFlow.bat**
+   (Windows). On Linux, run `./BaggageFlow.command` in a terminal.
+3. The page opens in your browser. To stop BaggageFlow, press `Ctrl+C` in the
+   window that opened (or just close it).
+
+The first start takes a minute: it installs Python and the project's
+dependencies, then builds the page. Later starts take a few seconds, and the
+page is built again only when its files change. The same thing from a
+terminal is `uv run baggageflow` (`--port 8080` for another port,
+`--no-browser` to open the page yourself). If BaggageFlow is already running,
+it just opens the page again; if port 8000 is taken by something else, it
+uses a free one and says which. On macOS, if a downloaded copy refuses to
+open the file, right-click it and choose **Open** once.
+
+The sections below go through the same steps one at a time.
+
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/), which
@@ -286,6 +306,8 @@ BaggageFlow is a teaching model, not a replica of a real plant:
 ```text
 bflow/core/     simulation engine (no server or graphics)
 bflow/server/   FastAPI server and WebSocket
+bflow/launch.py one-step start (uv run baggageflow)
+BaggageFlow.*   double-click start files for macOS/Linux and Windows
 frontend/       PixiJS page (Vite)
 tests/          Python tests (tests/e2e/: browser tests)
 docs/           manual browser checklist and the images of this README
