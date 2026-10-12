@@ -443,6 +443,15 @@ canvas { display: block; touch-action: none; }
 }
 .map-tools button { width: 34px; min-height: 34px; padding: 0; border: 0; border-radius: 8px; color: var(--muted); background: transparent; }
 .map-tools button:hover:not(:disabled) { color: var(--text); background: var(--raised); }
+.map-tools .tools-gap { height: 1px; margin: 3px 6px; background: var(--line); }
+/* The turn buttons only mean something in the hall view. */
+#map:not([data-view="hall"]) .hall-only { display: none; }
+/* Map or hall: the same floating glass as the camera tools, top left. */
+.view-switch {
+  position: absolute; z-index: 1; top: 16px; left: 16px;
+  background: rgba(27, 30, 33, 0.82); border-color: var(--line-soft);
+  backdrop-filter: blur(8px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
 
 .kpis {
   display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));

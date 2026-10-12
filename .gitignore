@@ -225,3 +225,8 @@ node_modules/
 frontend/dist/
 .vite/
 npm-debug.log*
+
+# Editor swap and backup files
+*.swp
+*.swo
+*~

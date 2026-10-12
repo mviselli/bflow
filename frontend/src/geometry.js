@@ -278,3 +278,138 @@ export function pickAt(point, bags, belts, toleranceM = 0, desks = []) {
   }
   return best && { kind: best.kind, id: best.id };
 }
+
+// --- Hall view: the plant seen from a corner of the hall (2.5D) -------------
+//
+// The hall view draws the same map in a parallel projection from above at an
+// angle: the map is turned by `yaw` around the vertical, then seen from
+// `elevation` above the horizon (90° is straight down, like the map), and a
+// height z above the floor (metres) moves a point up the screen. Projected
+// lengths are in "units" (metres at the scale of 1 pixel per metre); the
+// view's pixelsPerMetre and centre place them on the screen.
+
+// The floor slab around the plant (metres beyond its bounds), its thickness
+// shown at its cut edge, and the height of the walls on its far sides.
+export const HALL_MARGIN_M = 3;
+export const HALL_SLAB_M = 0.8;
+export const HALL_WALL_M = 2.4;
+// Room left around the fitted hall, in screen pixels.
+export const HALL_PADDING_PX = 28;
+// Seen from the south-west corner (the map's bottom-left), 33° above the floor.
+export const HALL_YAW = -Math.PI / 4;
+export const HALL_ELEVATION = (33 * Math.PI) / 180;
+// The hall's camera: the map's camera plus the direction it looks from.
+export const HALL_CAMERA = { zoom: 1, centre: null, yaw: HALL_YAW, elevation: HALL_ELEVATION };
+
+// The projection for a yaw and an elevation: `units` gives a map point at
+// height z in units, `fromUnits` the map point at height z under a unit
+// point, `depth` how near a map point is to the viewer (larger is nearer,
+// drawn later) and `toward` the horizontal direction towards the viewer.
+export function hallProjection(yaw, elevation) {
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const squash = Math.sin(elevation);
+  const lift = Math.cos(elevation);
+  return {
+    yaw,
+    elevation,
+    toward: { x: sin, y: cos },
+    depth: (x, y) => x * sin + y * cos,
+    units: (x, y, z = 0) => ({ u: x * cos - y * sin, v: (x * sin + y * cos) * squash - z * lift }),
+    fromUnits: (u, v, z = 0) => {
+      const near = (v + z * lift) / squash;
+      return { x_m: cos * u + sin * near, y_m: -sin * u + cos * near };
+    },
+  };
+}
+
+// The floor slab's corners, clockwise on the map.
+export function hallFloor(layout) {
+  const { left, top, right, bottom } = plantBounds(layout);
+  const m = HALL_MARGIN_M;
+  return [
+    { x: left - m, y: top - m }, { x: right + m, y: top - m },
+    { x: right + m, y: bottom + m }, { x: left - m, y: bottom + m },
+  ];
+}
+
+// The box in units holding the slab, from its underside to the top of the walls.
+function hallExtents(layout, projection) {
+  const points = hallFloor(layout).flatMap(({ x, y }) => [-HALL_SLAB_M, HALL_WALL_M]
+    .map((z) => projection.units(x, y, z)));
+  const us = points.map((point) => point.u);
+  const vs = points.map((point) => point.v);
+  return { left: Math.min(...us), right: Math.max(...us), top: Math.min(...vs), bottom: Math.max(...vs) };
+}
+
+// The hall seen through a camera on a screen area: with zoom 1 and no centre
+// the whole slab just fits, centred. Like plantGeometry, with a height for
+// every point: toScreen(point, z) and toMap(screen, z), the map point at
+// height z under a screen point (the inverse, used for picking).
+export function hallView(layout, screenWidth, screenHeight, camera = HALL_CAMERA) {
+  const projection = hallProjection(camera.yaw, camera.elevation);
+  const box = hallExtents(layout, projection);
+  const pad = Math.min(HALL_PADDING_PX, screenWidth / 8, screenHeight / 8);
+  const fit = Math.max(Math.min((screenWidth - 2 * pad) / (box.right - box.left),
+    (screenHeight - 2 * pad) / (box.bottom - box.top)), 1e-3);
+  const pixelsPerMetre = fit * camera.zoom;
+  const centre = camera.centre
+    ? projection.units(camera.centre.x_m, camera.centre.y_m)
+    : { u: (box.left + box.right) / 2, v: (box.top + box.bottom) / 2 };
+  return {
+    ...projection,
+    pixelsPerMetre,
+    fit,
+    box,
+    centre,
+    toScreen: (point, z = 0) => {
+      const { u, v } = projection.units(point.x_m, point.y_m, z);
+      return {
+        x: screenWidth / 2 + (u - centre.u) * pixelsPerMetre,
+        y: screenHeight / 2 + (v - centre.v) * pixelsPerMetre,
+      };
+    },
+    toMap: (screen, z = 0) => projection.fromUnits(
+      centre.u + (screen.x - screenWidth / 2) / pixelsPerMetre,
+      centre.v + (screen.y - screenHeight / 2) / pixelsPerMetre,
+      z,
+    ),
+  };
+}
+
+// Keeps a hall camera within limits, as clampCamera does for the map: zoom
+// between 1 and MAX_ZOOM and never more of the screen than the fitted view.
+export function clampHallCamera(layout, camera, screenWidth, screenHeight) {
+  const zoom = Math.min(Math.max(camera.zoom, 1), MAX_ZOOM);
+  const fitted = hallView(layout, screenWidth, screenHeight, { ...camera, zoom: 1, centre: null });
+  const halfWidth = screenWidth / fitted.fit / 2;
+  const halfHeight = screenHeight / fitted.fit / 2;
+  const centre = camera.centre
+    ? fitted.units(camera.centre.x_m, camera.centre.y_m)
+    : fitted.centre;
+  const clamp = (value, middle, half) => Math.min(Math.max(value, middle - half + half / zoom),
+    middle + half - half / zoom);
+  const u = clamp(centre.u, fitted.centre.u, halfWidth);
+  const v = clamp(centre.v, fitted.centre.v, halfHeight);
+  return { ...camera, zoom, centre: fitted.fromUnits(u, v) };
+}
+
+// The hall camera after zooming by `factor` around a screen point, keeping
+// the floor point under it in place.
+export function zoomHallAround(layout, camera, screenWidth, screenHeight, screen, factor) {
+  const before = hallView(layout, screenWidth, screenHeight, camera);
+  const zoom = Math.min(Math.max(camera.zoom * factor, 1), MAX_ZOOM);
+  const pixelsPerMetre = before.pixelsPerMetre * (zoom / camera.zoom);
+  const anchorU = before.centre.u + (screen.x - screenWidth / 2) / before.pixelsPerMetre;
+  const anchorV = before.centre.v + (screen.y - screenHeight / 2) / before.pixelsPerMetre;
+  const centre = before.fromUnits(anchorU - (screen.x - screenWidth / 2) / pixelsPerMetre,
+    anchorV - (screen.y - screenHeight / 2) / pixelsPerMetre);
+  return clampHallCamera(layout, { ...camera, zoom, centre }, screenWidth, screenHeight);
+}
+
+// The hall camera after dragging the view by (dx, dy) screen pixels.
+export function panHallBy(layout, camera, screenWidth, screenHeight, dx, dy) {
+  const view = hallView(layout, screenWidth, screenHeight, camera);
+  const centre = view.toMap({ x: screenWidth / 2 - dx, y: screenHeight / 2 - dy });
+  return clampHallCamera(layout, { ...camera, centre }, screenWidth, screenHeight);
+}

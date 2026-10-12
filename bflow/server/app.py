@@ -22,11 +22,18 @@ At the same time the browser sends commands as JSON. A command is
 validated, then queued: it takes effect at the runner's next update, even
 while the simulation is paused. An invalid command gets an ``error`` message
 back and the connection stays open.
+
+Only pages served by this server may connect: browsers let any web page
+open a WebSocket to any address, so a site visited while the simulator runs
+could otherwise send it commands. A browser always sends the page's
+``Origin``; a connection whose origin is another host is refused. Clients
+that are not browsers (the tests, scripts) send no origin and are accepted.
 """
 
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
@@ -95,6 +102,9 @@ def create_app(runner: Runner | None = None, *, frontend_dir: Path = FRONTEND_DI
 
     @app.websocket("/ws")
     async def websocket(websocket: WebSocket) -> None:
+        if not _same_origin(websocket):
+            await websocket.close(code=1008)  # policy violation
+            return
         await websocket.accept()
         layout = layout_message(runner.engine, runner.scenarios.values())
         await websocket.send_text(layout.model_dump_json())
@@ -111,6 +121,18 @@ def create_app(runner: Runner | None = None, *, frontend_dir: Path = FRONTEND_DI
 
     _serve_frontend(app, frontend_dir)
     return app
+
+
+def _same_origin(websocket: WebSocket) -> bool:
+    """Whether a connection comes from a page of this server (or from no page at all).
+
+    The page's origin must name the host the browser connected to: the same
+    host and port, also through the Vite dev server's proxy, which keeps both.
+    """
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return True
+    return urlsplit(origin).netloc == websocket.headers.get("host")
 
 
 def _serve_frontend(app: FastAPI, frontend_dir: Path) -> None:

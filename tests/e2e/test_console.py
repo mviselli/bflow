@@ -141,6 +141,35 @@ def test_a_fault_raises_an_alarm_that_only_the_repair_clears(page: Page, plant):
     assert types == ["fault_belt", "start", "acknowledge_alarm", "repair_belt"]
 
 
+def test_the_hall_view_shows_the_same_plant_and_is_remembered(page: Page, plant):
+    open_console(page, plant)
+    view = page.locator("#map")
+    hall = page.locator('.view-switch button[data-view="hall"]')
+    turn = page.locator("#turn-left")
+    expect(view).to_have_attribute("data-view", "map")
+    expect(turn).to_be_hidden()
+
+    hall.click()
+    expect(hall).to_have_attribute("aria-pressed", "true")
+    expect(view).to_have_attribute("data-view", "hall")
+    expect(turn).to_be_visible()
+    # The hall follows the run like the map; turning it changes nothing in the plant.
+    page.locator("#toggle").click()
+    expect(page.locator("#toggle")).to_have_attribute("data-running", "true")
+    plant.run_ticks(200)
+    expect(page.locator("#tick")).to_have_text("tick 200")
+    turn.click()
+    page.keyboard.press("e")
+
+    page.reload()
+    expect(page.locator("#connection")).to_have_text("Live")
+    expect(view).to_have_attribute("data-view", "hall")
+    page.locator('.view-switch button[data-view="map"]').click()
+    expect(view).to_have_attribute("data-view", "map")
+    expect(turn).to_be_hidden()
+    assert [kind for _, kind in recorded(plant)] == ["start"]
+
+
 @pytest.fixture(autouse=True)
 def no_console_errors(page: Page):
     errors = []

@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  DIVERT_PATH, EYE_BEFORE_M, GATE, GATE_CLEAR_M, GATE_TRAVEL_M, SLIDE_SPEED_M_S, divertPose, eyeAlong,
-  eyeBlocked, followOffset, gateOpening, routeOffset, sideBranchOf, sorterBranches,
+  DIVERT_PATH, DIVERT_TURN_STEP, EYE_BEFORE_M, GATE, GATE_CLEAR_M, GATE_TRAVEL_M, SLIDE_SPEED_M_S, divertPose,
+  divertedBaggage, eyeAlong, eyeBlocked, followOffset, gateOpening, routeOffset, sideBranchOf, sorterBranches,
 } from '../src/sorters.js';
 
 function belt(id, source, target, [x1, y1], [x2, y2]) {
@@ -175,4 +175,24 @@ test('a diverted bag catches up the one-tick transfer at SLIDE_SPEED_M_S, never 
     drawn = followOffset(drawn, -2 + t, 0.05);
     assert.ok(Math.abs(drawn - (-2 + t)) < 1e-9);
   }
+});
+
+const near = (actual, expected, tolerance = 1e-9) => assert.ok(Math.abs(actual - expected) <= tolerance,
+  `${actual} is not ${expected}`);
+
+test('a bag diverted into a side branch is placed along the gate, others are left as they are', () => {
+  const sorters = sorterBranches(layout);
+  const branch = layout.belts.find((item) => item.id === 'branch-1');
+  const onBranch = { id: 'bag-1', conveyor_id: 'branch-1', position_m: 0.1, length_m: 0.6, destination_id: 'output-1' };
+  const next = new Map();
+  const placed = divertedBaggage(sorters, new Map(), onBranch, 0, next);
+  assert.ok(placed.place && Number.isFinite(placed.placeAngle));
+  assert.equal(next.get('bag-1'), placed.slideOffset);
+  // Its heading is a whole number of turning steps.
+  near(placed.placeAngle / DIVERT_TURN_STEP, Math.round(placed.placeAngle / DIVERT_TURN_STEP));
+  // Far along the branch it is simply on its belt's axis.
+  const further = divertedBaggage(sorters, new Map(), { ...onBranch, position_m: 2 }, 0, new Map());
+  near(further.place.x_m, branch.start.x_m);
+  const straight = { id: 'bag-2', conveyor_id: 'line-1', position_m: 1, length_m: 0.6, destination_id: 'output-3' };
+  assert.equal(divertedBaggage(sorters, new Map(), straight, 0, new Map()), straight);
 });

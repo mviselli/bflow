@@ -5,6 +5,7 @@ import { createCharts } from './charts.js';
 import { createControls } from './controls.js';
 import { createDock } from './dock.js';
 import { createEventLog } from './eventlog.js';
+import { createHall } from './hall.js';
 import { destinationLooks } from './looks.js';
 import { createPanel, panelContent } from './panel.js';
 import { createPlantControls } from './plantcontrols.js';
@@ -15,6 +16,28 @@ const map = document.querySelector('#map');
 const status = document.querySelector('#status');
 const indicatorsNote = document.querySelector('#indicators-note');
 const app = new Application();
+const CANVAS_LABELS = {
+  map: 'Baggage plant from the check-in desks to the outputs, seen from above',
+  hall: 'Baggage hall seen from one of its corners',
+};
+
+// The view shown over the map area, remembered in this browser only
+// (storage can be unavailable: then the page starts on the map).
+const VIEW_KEY = 'baggageflow.view';
+function loadView() {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'hall' ? 'hall' : 'map';
+  } catch {
+    return 'map';
+  }
+}
+function saveView(view) {
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // Storage unavailable: the view is simply not remembered.
+  }
+}
 
 // The legend's destinations: each output's tag code and colour, as on the bags.
 function showDestinations(layout, destinations) {
@@ -43,7 +66,6 @@ async function initialize() {
   });
   map.appendChild(app.canvas);
   app.canvas.setAttribute('role', 'img');
-  app.canvas.setAttribute('aria-label', 'Baggage plant from the check-in desks to the outputs');
   status.textContent = 'Connecting to the simulation server…';
   // PixiJS follows only window resizes: the map also changes size when the
   // side panel opens or closes, so follow the element itself.
@@ -62,23 +84,70 @@ async function initialize() {
   // A click on the map opens the Details page; a selection made from a list
   // (alarms, belts) shows the element on the map and leaves that list open.
   let fromList = false;
-  const renderer = createRenderer(app, {
-    onSelect(selection) {
-      selected = selection;
-      showPanel();
-      if (selection && !fromList) dock.open('inspect');
-    },
-  });
+  const onSelect = (selection) => {
+    selected = selection;
+    showPanel();
+    if (selection && !fromList) dock.open('inspect');
+  };
+  // Two views of the same plant on one canvas: the top-down map and the
+  // hall seen from a corner. Both follow every message; only the one shown
+  // draws and answers the pointer.
+  const renderer = createRenderer(app, { onSelect });
+  const hall = createHall(app, { onSelect });
+  let view = loadView();
+  let switching = false;  // while the hall lies back down into the map
+  const shown = () => (view === 'hall' ? hall : renderer);
   const selectFromList = (selection) => {
     fromList = true;
-    renderer.select(selection);
+    shown().select(selection);
     fromList = false;
   };
-  document.querySelector('#zoom-in').addEventListener('click', () => renderer.zoomIn());
-  document.querySelector('#zoom-out').addEventListener('click', () => renderer.zoomOut());
-  document.querySelector('#fit').addEventListener('click', () => renderer.fit());
+  const viewButtons = [...document.querySelectorAll('.view-switch button')];
+  function markView() {
+    map.dataset.view = view;
+    app.canvas.setAttribute('aria-label', CANVAS_LABELS[view]);
+    for (const button of viewButtons) button.setAttribute('aria-pressed', String(button.dataset.view === view));
+  }
+  // Switching tilts the map up into the hall, or lays the hall back down
+  // into the map, keeping the selection; a hidden tab switches at once.
+  function showView(next) {
+    if (next === view || switching) return;
+    const animate = document.visibilityState === 'visible';
+    view = next;
+    saveView(view);
+    markView();
+    if (view === 'hall') {
+      renderer.setActive(false);
+      hall.setActive(true);
+      selectFromList(selected);
+      hall.enter(animate);
+      return;
+    }
+    switching = true;
+    hall.leave(animate, () => {
+      hall.setActive(false);
+      renderer.setActive(true);
+      selectFromList(selected);
+      switching = false;
+    });
+  }
+  renderer.setActive(view === 'map');
+  hall.setActive(view === 'hall');
+  if (view === 'hall') hall.enter(false);
+  markView();
+  for (const button of viewButtons) button.addEventListener('click', () => showView(button.dataset.view));
+  document.querySelector('#zoom-in').addEventListener('click', () => shown().zoomIn());
+  document.querySelector('#zoom-out').addEventListener('click', () => shown().zoomOut());
+  document.querySelector('#fit').addEventListener('click', () => shown().fit());
+  document.querySelector('#turn-left').addEventListener('click', () => hall.turn(-1));
+  document.querySelector('#turn-right').addEventListener('click', () => hall.turn(1));
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') renderer.clearSelection();
+    if (event.key === 'Escape') shown().clearSelection();
+    // Q and E turn the hall, unless the keys are typed into a field.
+    const typing = event.target.closest?.('input, textarea, select');
+    if (view !== 'hall' || typing || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === 'q' || event.key === 'Q') hall.turn(-1);
+    if (event.key === 'e' || event.key === 'E') hall.turn(1);
   });
   let plantControls = null;
   const controls = createControls({
@@ -137,6 +206,7 @@ async function initialize() {
         destinations = destinationLooks(layout.outputs);
         latest = null;
         renderer.setLayout(message);
+        hall.setLayout(message);
         controls.setLayout(message);
         eventLog.setLayout(message);
         plantControls.setLayout(message);
@@ -144,6 +214,7 @@ async function initialize() {
       }
       else if (message.type === 'snapshot') {
         renderer.setSnapshot(message);
+        hall.setSnapshot(message);
         controls.setSnapshot(message);
         eventLog.setSnapshot(message);
         charts.setSnapshot(message);

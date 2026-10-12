@@ -1,7 +1,8 @@
 # BaggageFlow
 
-An educational airport baggage-sorting simulator: a Python engine and a 2D
-browser view built with PixiJS.
+An educational airport baggage-sorting simulator: a Python engine and a
+browser console built with PixiJS, showing the plant from above or as a hall
+seen from one of its corners.
 
 The engine models a small airport plant: six check-in desks in two islands,
 whose belts join one sort line, and three diverts along the line that send
@@ -104,6 +105,19 @@ bag is taken.
 From there you can stop and restart a belt, simulate a fault on it and repair
 it, or change how many bags arrive at a desk. `Esc` clears the selection.
 
+![The hall view: the same plant as a scale model seen from a corner of the hall, with normal traffic](docs/images/hall.png)
+
+The **Map** / **Hall** switch over the map shows the same plant as a scale
+model of the hall seen from one of its corners: belts on their legs, desks
+with their queues, chutes dropping through the floor, signs on poles and a
+light tower beside every belt, whose lit lamp tells its state by its height
+as well as its colour (blue at the bottom stopped, amber warning, red at the
+top fault). Everything moves exactly as on the map. Zoom, drag and click work
+the same; **Q** and **E**, or the turn buttons, turn the hall a quarter turn
+to see behind the desks and signs. The page remembers which view you used.
+
+![The hall during a belt fault: line 2's rails dashed red under its red lamp, the backed-up belts dashed amber, waiting bags with clocks and passengers queueing at the desks](docs/images/hall-fault.png)
+
 The page colours only what needs attention: the plant running normally is
 grey. Each belt has a light beside it, with its own symbol: a grey dot
 running, a blue square stopped by the operator, an amber triangle with a
@@ -148,7 +162,8 @@ The pages of the side panel:
   view, highlighted while they call for attention; click one for more. The
   command-line run prints the same breakdown and the alarms still open at
   the end.
-- **Legend**: the belt lights, the destinations and how to use the map.
+- **Legend**: the belt lights, the hall's light towers, the destinations and
+  how to use the map.
 
 If the server stops or the network drops, the page says so over the map,
 disables the commands and keeps the last state received, dimmed; it reconnects

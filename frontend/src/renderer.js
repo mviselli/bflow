@@ -55,10 +55,7 @@ import {
 } from './passengers.js';
 import { advanceSurface, createPlayback, isNewRun } from './playback.js';
 import { addWrongExits, beltLights, beltStates, dashes, wrongExitSignals } from './signals.js';
-import {
-  GATE, divertPose, eyeAlong, eyeBlocked, followOffset, gateOpening, routeOffset, sideBranchOf,
-  sorterBranches,
-} from './sorters.js';
+import { GATE, divertedBaggage, eyeAlong, eyeBlocked, gateOpening, sorterBranches } from './sorters.js';
 
 // Real time in seconds, for the display clock.
 function nowSeconds() {
@@ -74,7 +71,7 @@ const PICK_TOLERANCE_PX = 6;
 const SELECTION_COLOUR = 0xffffff;
 // Status lights: colour by state (as in styles.css), radius and place beside
 // the belt (metres).
-const LIGHT_COLOURS = { fault: 0xf0524f, warning: 0xf2b33d, stopped: 0x5b9bff, running: 0x8a939a };
+export const LIGHT_COLOURS = { fault: 0xf0524f, warning: 0xf2b33d, stopped: 0x5b9bff, running: 0x8a939a };
 const LIGHT_BACKING = 0x15181a;
 const LIGHT_RADIUS_M = 0.17;
 const LIGHT_ALONG_M = 1.2;
@@ -87,15 +84,12 @@ const WRONG_EXIT_COLOUR = 0xf0524f;
 const PASSENGER_FACINGS = 32;
 // A belt's condition along its edges: dash and gap lengths in metres (no
 // gap: solid) and the line's width.
-const EDGE_PATTERNS = {
+export const EDGE_PATTERNS = {
   stopped: { onM: 1, offM: 0, widthM: 0.08 },
   congested: { onM: 0.5, offM: 0.3, widthM: 0.08 },
   fault: { onM: 0.18, offM: 0.14, widthM: 0.12 },
 };
-const STATE_OF_EDGE = { stopped: 'stopped', congested: 'warning', fault: 'fault' };
-// A bag sliding along a divert gate turns in steps of this angle, so the
-// textures drawn for it stay few.
-const DIVERT_TURN_STEP = Math.PI / 36;
+export const STATE_OF_EDGE = { stopped: 'stopped', congested: 'warning', fault: 'fault' };
 const STEEL = 0xc3ccd3;
 const STEEL_DARK = 0x22272c;
 const EYE_LIT = 0xf4f6f8;
@@ -118,7 +112,7 @@ function outlineAlong(graphics, geometry, belt, from, to, widthM, color = SELECT
 }
 
 // A belt light's symbol, centred on (x, y) and about `radius` in size.
-function drawLight(graphics, x, y, radius, state, alpha) {
+export function drawLight(graphics, x, y, radius, state, alpha) {
   const color = LIGHT_COLOURS[state];
   if (state === 'running') {
     graphics.circle(x, y, radius * 0.55).fill({ color, alpha });
@@ -152,6 +146,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   world.addChild(floor, surfaceLayer, frame, counters, mechanisms, people, signals, highlight, bagLayer, badges);
   app.stage.addChild(world);
 
+  let active = true;              // false while the hall view is shown instead
   let layout = null;
   let belts = new Map();          // belt id → belt from the layout
   let destinations = new Map();   // output id → { code, colour }
@@ -308,36 +303,13 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
     }
   }
 
-  // A bag diverted into a side branch is drawn sliding along the open
-  // gate's face and turning into the branch, instead of turning sharply at
-  // the plate's centre: `place` (map point) and `placeAngle` replace its
-  // place on its belt. Its route offset follows the engine's, catching up
-  // the one-tick transfer at SLIDE_SPEED_M_S (sorters.js followOffset).
-  function divert(baggage, dtS, next) {
-    for (const sorter of sorters.values()) {
-      const branch = sideBranchOf(sorter, baggage);
-      if (!branch) continue;
-      const offset = followOffset(slides.get(baggage.id), routeOffset(sorter, branch, baggage), dtS);
-      next.set(baggage.id, offset);
-      const pose = divertPose(offset, branch.side);
-      if (!pose) return baggage;
-      const angle = beltAngle(sorter.incoming);
-      return {
-        ...baggage,
-        slideOffset: offset,
-        place: frameToMap(sorter.position, angle, pose.x, pose.y),
-        placeAngle: Math.round((angle + pose.angle) / DIVERT_TURN_STEP) * DIVERT_TURN_STEP,
-      };
-    }
-    return baggage;
-  }
-
   function placeBaggage(timeS) {
     const present = new Set();
     const dtS = slideTime === null ? 0 : timeS - slideTime;
     slideTime = timeS;
     const next = new Map();
-    drawnBags = playback.baggageAt(timeS, belts).map((baggage) => divert(baggage, dtS, next));
+    drawnBags = playback.baggageAt(timeS, belts)
+      .map((baggage) => divertedBaggage(sorters, slides, baggage, dtS, next));
     slides = next;
     for (const baggage of drawnBags) {
       const belt = belts.get(baggage.conveyor_id);
@@ -608,7 +580,7 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
 
   // Called by the PixiJS ticker before each frame is rendered.
   function update() {
-    if (!layout) return;
+    if (!active || !layout) return;
     if (!geometry) buildScene();
     const timeS = playback.advance(nowSeconds());
     if (timeS === null) return;
@@ -669,20 +641,20 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   const canvas = app.canvas;
   let press = null;  // { id, start, last, dragging } while a pointer is down
   canvas.addEventListener('wheel', (event) => {
-    if (!layout) return;
+    if (!active || !layout) return;
     event.preventDefault();
     const { width, height } = app.screen;
     const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015));
     setCamera(zoomAround(layout, camera, width, height, pointerPoint(event), factor));
   }, { passive: false });
   canvas.addEventListener('pointerdown', (event) => {
-    if (!layout || event.button !== 0) return;
+    if (!active || !layout || event.button !== 0) return;
     const point = pointerPoint(event);
     press = { id: event.pointerId, start: point, last: point, dragging: false };
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener('pointermove', (event) => {
-    if (!layout) return;
+    if (!active || !layout) return;
     const point = pointerPoint(event);
     if (!press || press.id !== event.pointerId) {
       canvas.style.cursor = pickScreen(point) ? 'pointer' : camera.zoom > 1 ? 'grab' : '';
@@ -717,6 +689,15 @@ export function createRenderer(app, { onSelect = () => {} } = {}) {
   }
 
   return {
+    // Shows or hides this view (the page shows either the map or the hall).
+    // Hidden, it keeps following the snapshots but draws nothing; shown
+    // again, it redraws for the current screen size.
+    setActive(on) {
+      active = on;
+      world.visible = on;
+      press = null;
+      if (on) geometry = null;
+    },
     // A new layout arrives on every (re)connection, with a full state after
     // it: forget the old state. For the same plant, keep the view and a
     // selected belt or desk; a bag may belong to an old run, so it goes.

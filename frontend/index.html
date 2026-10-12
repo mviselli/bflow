@@ -158,6 +158,8 @@
               <li><i class="edge" data-state="fault"></i><span><b>Short red dashes</b> The belt is faulty.</span></li>
               <li><i class="wait-clock"></i><span><b>Clock on a bag</b> The bag has not moved for 30 s.</span></li>
             </ul>
+            <h3>Hall view</h3>
+            <p class="page-note">The same plant seen from a corner of the hall, with the same bags, gates and queues. Each belt has a light tower whose lit lamp tells its state by height as well as colour: blue at the bottom when stopped, amber in the middle for a warning, red at the top for a fault; the symbol above it is the map's. Turn the hall to see behind the desks and signs.</p>
             <h3>Sorters and chutes</h3>
             <p class="page-note">A sorter's gate swings across the line to send the next bag into its branch, as the simulation decides; the light before it turns white while a bag passes. Each chute's counter shows the bags delivered there correctly.</p>
             <h3>Check-in queues</h3>
@@ -171,6 +173,7 @@
               <li><kbd>Drag</kbd><span>Move the view</span></li>
               <li><kbd>Click</kbd><span>Details of a bag, belt or check-in desk</span></li>
               <li><kbd>Esc</kbd><span>Clear the selection</span></li>
+              <li><kbd>Q</kbd> <kbd>E</kbd><span>Turn the hall view a quarter turn</span></li>
             </ul>
           </section>
         </div>
@@ -179,7 +182,18 @@
       <main class="stage">
         <div id="map">
           <p id="status" role="status">Initializing graphics…</p>
-          <div class="map-tools" role="group" aria-label="View">
+          <div class="view-switch segmented" role="group" aria-label="View">
+            <button type="button" data-view="map" aria-pressed="true" title="The plant seen from above">Map</button>
+            <button type="button" data-view="hall" aria-pressed="false" title="The hall seen from one of its corners">Hall</button>
+          </div>
+          <div class="map-tools" role="group" aria-label="Camera">
+            <button id="turn-left" type="button" class="hall-only" aria-label="Turn the hall left" title="Turn the hall left (Q)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 9.2c2.7.7 4.5 1.9 4.5 3.3 0 2.5-4 4.5-9 4.5s-9-2-9-4.5c0-1.5 1.6-2.8 4-3.6" /><path d="M9.5 6.2 7 8.9l2.9 2.2" /></svg>
+            </button>
+            <button id="turn-right" type="button" class="hall-only" aria-label="Turn the hall right" title="Turn the hall right (E)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 9.2C4.8 9.9 3 11.1 3 12.5 3 15 7 17 12 17s9-2 9-4.5c0-1.5-1.6-2.8-4-3.6" /><path d="M14.5 6.2 17 8.9l-2.9 2.2" /></svg>
+            </button>
+            <span class="tools-gap hall-only" aria-hidden="true"></span>
             <button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12" /></svg>
             </button>

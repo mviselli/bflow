@@ -7,7 +7,9 @@ status or the snapshots show the expected state.
 
 import time
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from bflow.core.engine import Engine
 from bflow.core.layout import default_layout, minimal_layout
@@ -144,6 +146,23 @@ def test_a_scenario_is_selected_over_the_websocket_and_an_unknown_one_refused():
         wait_for_status(client, {"run": 2, "scenario": "fault"})
         assert client.get("/api/commands").json() == [
             {"tick": 0, "time_s": 0.0, "command": {"type": "reset", "scenario_id": "fault"}}]
+
+
+def test_only_pages_of_this_server_may_connect():
+    app, _, _ = make_app()
+    with TestClient(app) as client:
+        # Another site's page: refused before anything is sent.
+        with pytest.raises(WebSocketDisconnect) as refused:
+            with client.websocket_connect("/ws", headers={"origin": "https://example.com"}) as ws:
+                ws.receive_json()
+        assert refused.value.code == 1008
+        # Same host and port as the server (TestClient's host is "testserver").
+        with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+            assert ws.receive_json()["type"] == "layout"
+        # Same host name on another port: another origin.
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws", headers={"origin": "http://testserver:5173"}) as ws:
+                ws.receive_json()
 
 
 def test_binary_frames_are_accepted():

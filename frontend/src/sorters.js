@@ -7,6 +7,8 @@
 // no gate timings: the gate moves with the bag it diverts, so it shows the
 // engine's decisions and stops when the simulation is paused.
 
+import { beltAngle, frameToMap } from './geometry.js';
+
 // The photo-eye's distance before the plate, along the belt entering it.
 export const EYE_BEFORE_M = 0.3;
 
@@ -175,4 +177,35 @@ export function divertPose(offsetM, side) {
     y: side * (a.y + (b.y - a.y) * t),
     angle: side * (a.angle + (b.angle - a.angle) * t),
   };
+}
+
+// A bag sliding along a divert gate turns in steps of this angle, so the
+// textures (or shapes) drawn for it stay few.
+export const DIVERT_TURN_STEP = Math.PI / 36;
+
+// A bag diverted into a side branch is drawn sliding along the open gate's
+// face and turning into the branch, instead of turning sharply at the
+// plate's centre: the bag is returned with `place` (map point of its centre)
+// and `placeAngle`, which replace its place on its belt, and `slideOffset`.
+// Its route offset follows the engine's, catching up the one-tick transfer
+// at SLIDE_SPEED_M_S (followOffset) from the offset in `slides` (bag id →
+// offset drawn at the last frame); the new offset goes into `next`. Any
+// other bag is returned as it is.
+export function divertedBaggage(sorters, slides, baggage, dtS, next) {
+  for (const sorter of sorters.values()) {
+    const branch = sideBranchOf(sorter, baggage);
+    if (!branch) continue;
+    const offset = followOffset(slides.get(baggage.id), routeOffset(sorter, branch, baggage), dtS);
+    next.set(baggage.id, offset);
+    const pose = divertPose(offset, branch.side);
+    if (!pose) return baggage;
+    const angle = beltAngle(sorter.incoming);
+    return {
+      ...baggage,
+      slideOffset: offset,
+      place: frameToMap(sorter.position, angle, pose.x, pose.y),
+      placeAngle: Math.round((angle + pose.angle) / DIVERT_TURN_STEP) * DIVERT_TURN_STEP,
+    };
+  }
+  return baggage;
 }
